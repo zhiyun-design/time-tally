@@ -1,0 +1,1902 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="时间账本">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="description" content="本地优先的时间统计应用，支持二级标签分类、导出导入同步">
+<title>时间账本</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#ffffff; --text:#14161a; --muted:#6b7280; --line:#e9ebef;
+    --soft:#f0f1f4; --accent:#4f46e5; --accent-2:#6366f1; --danger:#e5484d;
+    --shadow:0 1px 2px rgba(16,18,24,.04), 0 8px 24px rgba(16,18,24,.06);
+    --r:16px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f1115; --card:#171a20; --text:#e8eaf0; --muted:#98a1b0; --line:#252932;
+      --soft:#1e222a; --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35); }
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  [hidden]{ display:none !important; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    font-size:16px; line-height:1.5; -webkit-font-smoothing:antialiased;
+    overscroll-behavior-y:none;
+  }
+  button{ font:inherit; color:inherit; border:0; background:none; cursor:pointer; }
+  input,select{ font:inherit; color:inherit; }
+  .num{ font-variant-numeric:tabular-nums; }
+
+  .app{ max-width:560px; margin:0 auto; padding:0 16px 104px; }
+
+  /* 顶栏 */
+  .hdr{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; padding:22px 2px 14px; }
+  .hdr-date{ font-size:15px; font-weight:600; letter-spacing:.01em; }
+  .hdr-total{ font-size:26px; font-weight:700; letter-spacing:-.02em; margin-top:2px; }
+  .hdr-total small{ font-size:13px; font-weight:500; color:var(--muted); margin-left:6px; letter-spacing:0; }
+  .hdr-right{ text-align:right; color:var(--muted); font-size:12px; line-height:1.35; padding-bottom:3px; }
+
+  /* 计时卡 */
+  .timer-card{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--r);
+    padding:14px 16px; box-shadow:var(--shadow);
+    display:flex; align-items:center; gap:12px; min-height:66px;
+  }
+  .t-dot{ width:9px; height:9px; border-radius:50%; background:#c3c8d2; flex:none; }
+  .t-dot.on{ background:var(--accent); box-shadow:0 0 0 4px rgba(79,70,229,.14); animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ opacity:1 } 50%{ opacity:.45 } }
+  .t-body{ flex:1; min-width:0; }
+  .t-label{ font-size:13px; color:var(--muted); }
+  .t-cat{ font-size:15px; font-weight:600; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .t-cat .sep{ color:var(--muted); font-weight:400; margin:0 5px; }
+  .t-time{ font-size:22px; font-weight:700; letter-spacing:-.01em; font-variant-numeric:tabular-nums; }
+  .t-switch{ font-size:12px; color:var(--accent); padding:7px 10px; border-radius:9px; background:rgba(79,70,229,.08); flex:none; }
+
+  /* 大按钮 */
+  .start-wrap{ display:grid; place-items:center; padding:22px 0 18px; }
+  .start-btn{
+    width:158px; height:158px; border-radius:50%;
+    background:linear-gradient(158deg,#6366f1,#4f46e5 62%,#4338ca);
+    color:#fff; font-size:21px; font-weight:650; letter-spacing:.02em;
+    box-shadow:0 14px 34px rgba(79,70,229,.32), inset 0 1px 0 rgba(255,255,255,.18);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+    transition:transform .16s ease, box-shadow .16s ease;
+  }
+  .start-btn:active{ transform:scale(.955); box-shadow:0 6px 18px rgba(79,70,229,.3); }
+  .start-btn .sb-sub{ font-size:11px; font-weight:500; opacity:.72; letter-spacing:.06em; }
+  .start-btn.running{
+    background:linear-gradient(158deg,#f26d71,#e5484d 60%,#cf3439);
+    box-shadow:0 14px 34px rgba(229,72,77,.3), inset 0 1px 0 rgba(255,255,255,.18);
+  }
+  .start-btn svg{ width:22px; height:22px; margin-bottom:2px; }
+
+  /* 快捷动作 */
+  .quick{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:9px; }
+  .qa{
+    background:var(--card); border:1px solid var(--line); border-radius:13px;
+    padding:11px 6px; display:flex; flex-direction:column; align-items:center; gap:5px;
+    font-size:12.5px; font-weight:550; color:var(--text); box-shadow:var(--shadow);
+    transition:transform .12s ease, background .12s ease;
+  }
+  .qa:active{ transform:scale(.965); background:var(--soft); }
+  .qa svg{ width:18px; height:18px; color:var(--accent); }
+  .qa.primary{ border-color:rgba(79,70,229,.25); background:rgba(79,70,229,.055); }
+
+  /* 常用标签 */
+  .recent{ margin-top:20px; }
+  .sec-label{ font-size:12px; font-weight:650; color:var(--muted); letter-spacing:.06em; margin-bottom:9px; }
+  .chips{ display:flex; gap:8px; overflow-x:auto; padding:1px 0 4px; scrollbar-width:none; }
+  .chips::-webkit-scrollbar{ display:none; }
+  .chip{
+    flex:none; display:inline-flex; align-items:center; gap:6px;
+    background:var(--card); border:1px solid var(--line); border-radius:11px;
+    padding:9px 12px; font-size:13.5px; font-weight:550; box-shadow:var(--shadow);
+    white-space:nowrap; transition:transform .12s ease;
+  }
+  .chip:active{ transform:scale(.955); }
+  .chip i{ width:7px; height:7px; border-radius:2px; background:var(--c,#94a3b8); flex:none; }
+  .chip .chip-cat{ font-size:11px; color:var(--muted); font-weight:450; }
+
+  /* 列表 */
+  .list-sec{ margin-top:22px; }
+  .sec-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .day-nav{ display:flex; align-items:center; gap:2px; }
+  .day-nav button{ width:26px; height:26px; border-radius:8px; display:grid; place-items:center; color:var(--muted); font-size:15px; }
+  .day-nav button:active{ background:var(--soft); }
+  .day-nav button:disabled{ opacity:.28; }
+  #listDayLabel{ font-size:15px; font-weight:650; min-width:64px; text-align:center; }
+  .sec-head .sum{ font-size:12.5px; color:var(--muted); }
+  .day-dayname{ font-size:12px; color:var(--muted); font-weight:500; }
+
+  .entry{
+    display:flex; gap:0; background:var(--card); border:1px solid var(--line);
+    border-radius:13px; margin-bottom:8px; overflow:hidden; box-shadow:var(--shadow);
+    transition:transform .1s ease;
+  }
+  .entry:active{ transform:scale(.99); }
+  .entry-bar{ width:4px; flex:none; }
+  .entry-main{ flex:1; padding:11px 13px; min-width:0; }
+  .entry-top{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .entry-time{ font-size:12.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .entry-dur{ font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .entry-cat{ font-size:14.5px; font-weight:600; margin-top:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .entry-cat i{ width:7px; height:7px; border-radius:2px; flex:none; }
+  .entry-cat .sep{ color:var(--muted); font-weight:400; }
+  .entry-note{ font-size:12.5px; color:var(--muted); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .entry-live .entry-dur{ color:var(--accent); }
+  .warn-dot{ font-size:10px; color:#d97706; background:rgba(217,119,6,.12); border-radius:5px; padding:1px 5px; font-weight:600; }
+
+  .empty{ text-align:center; color:var(--muted); font-size:13.5px; padding:34px 10px; background:var(--card); border:1px dashed var(--line); border-radius:13px; }
+
+  /* 统计 */
+  .seg{ display:flex; background:var(--soft); border-radius:12px; padding:3px; margin:6px 0 16px; }
+  .seg button{ flex:1; padding:8px 4px; border-radius:9px; font-size:13.5px; font-weight:600; color:var(--muted); transition:.15s; }
+  .seg button.on{ background:var(--card); color:var(--text); box-shadow:0 1px 3px rgba(16,18,24,.1); }
+  .hero{ padding:6px 2px 20px; }
+  .hero-num{ font-size:38px; font-weight:750; letter-spacing:-.03em; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .hero-meta{ font-size:13px; color:var(--muted); margin-top:5px; }
+
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:16px; margin-bottom:12px; box-shadow:var(--shadow); }
+  .card-title{ font-size:13px; font-weight:650; color:var(--muted); letter-spacing:.04em; margin-bottom:14px; }
+
+  .donut-wrap{ display:flex; align-items:center; gap:20px; }
+  .donut{ width:132px; height:132px; border-radius:50%; position:relative; flex:none; display:grid; place-items:center; }
+  .donut::after{ content:""; position:absolute; inset:24px; border-radius:50%; background:var(--card); }
+  .donut-c{ position:relative; z-index:1; text-align:center; }
+  .donut-c b{ display:block; font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .donut-c span{ font-size:10.5px; color:var(--muted); }
+  .legend{ flex:1; min-width:0; display:flex; flex-direction:column; gap:9px; }
+  .lg-row{ display:flex; align-items:center; gap:7px; font-size:13px; }
+  .lg-row i{ width:8px; height:8px; border-radius:2px; flex:none; }
+  .lg-row .lg-n{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lg-row .lg-v{ color:var(--muted); font-variant-numeric:tabular-nums; font-size:12.5px; }
+
+  .bar-row{ margin-bottom:11px; }
+  .bar-top{ display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; gap:8px; }
+  .bar-top .bn{ display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-top .bn i{ width:8px; height:8px; border-radius:2px; flex:none; }
+  .bar-top .bv{ color:var(--muted); font-variant-numeric:tabular-nums; font-size:12.5px; flex:none; }
+  .track{ height:7px; background:var(--soft); border-radius:4px; overflow:hidden; }
+  .fill{ height:100%; border-radius:4px; transition:width .4s cubic-bezier(.4,0,.2,1); }
+
+  .bars7{ display:flex; align-items:flex-end; gap:8px; height:112px; padding-top:6px; }
+  .b7{ flex:1; display:flex; flex-direction:column; align-items:center; gap:6px; height:100%; justify-content:flex-end; }
+  .b7 .bt{ flex:1; width:100%; display:flex; align-items:flex-end; }
+  .b7 .bf{ width:100%; background:linear-gradient(180deg,var(--accent-2),var(--accent)); border-radius:5px 5px 2px 2px; min-height:2px; opacity:.9; }
+  .b7 .bf.zero{ background:var(--soft); }
+  .b7 .bl{ font-size:10.5px; color:var(--muted); white-space:nowrap; }
+  .b7 .bl.today{ color:var(--accent); font-weight:650; }
+
+  /* 设置 */
+  .row-btn{ display:flex; width:100%; align-items:center; justify-content:space-between; padding:12px 0; font-size:14.5px; border-top:1px solid var(--line); }
+  .row-btn:first-of-type{ border-top:0; }
+  .row-btn .rb-l{ display:flex; flex-direction:column; gap:2px; text-align:left; }
+  .row-btn .rb-s{ font-size:12px; color:var(--muted); }
+  .row-btn.danger{ color:var(--danger); }
+  .row-btn .arrow{ color:var(--muted); font-size:13px; }
+  .hint{ font-size:12.5px; color:var(--muted); line-height:1.65; margin:10px 0 0; }
+  .hint b{ color:var(--text); font-weight:600; }
+
+  .ce-cat{ padding:12px 0; border-top:1px solid var(--line); }
+  .ce-cat:first-child{ border-top:0; padding-top:0; }
+  .ce-row{ display:flex; align-items:center; gap:9px; }
+  .ce-row input[type=color]{ width:24px; height:24px; padding:0; border:1px solid var(--line); border-radius:7px; background:none; cursor:pointer; flex:none; }
+  .ce-name{ flex:1; min-width:0; border:1px solid var(--line); background:transparent; border-radius:8px; padding:6px 9px; font-size:14px; font-weight:600; }
+  .ce-name:focus{ outline:none; border-color:var(--accent); background:var(--soft); }
+  .ce-del{ font-size:12px; color:var(--muted); padding:5px 8px; border-radius:7px; }
+  .ce-del:active{ background:var(--soft); color:var(--danger); }
+  .ce-subs{ display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; padding-left:33px; }
+  .ce-sub{ display:inline-flex; align-items:center; gap:4px; background:var(--soft); border-radius:8px; padding:4px 6px 4px 9px; font-size:12.5px; }
+  .ce-sub button{ color:var(--muted); font-size:14px; line-height:1; padding:1px 3px; border-radius:4px; }
+  .ce-sub button:active{ color:var(--danger); }
+  .ce-add{ font-size:12.5px; color:var(--accent); border:1px dashed rgba(79,70,229,.35); border-radius:8px; padding:4px 9px; }
+
+  /* 底部 tab */
+  .tabbar{
+    position:fixed; left:0; right:0; bottom:0; z-index:40;
+    background:color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter:saturate(180%) blur(16px); -webkit-backdrop-filter:saturate(180%) blur(16px);
+    border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  .tabbar-inner{ max-width:560px; margin:0 auto; display:flex; }
+  @media (min-width:700px){
+    .tabbar{
+      left:50%; right:auto; transform:translateX(-50%);
+      width:560px; max-width:calc(100vw - 32px);
+      bottom:0; border:1px solid var(--line); border-bottom:0;
+      border-radius:18px 18px 0 0;
+    }
+  }
+  .tab{ flex:1; padding:9px 0 8px; display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--muted); font-size:10.5px; font-weight:550; }
+  .tab svg{ width:21px; height:21px; }
+  .tab.on{ color:var(--accent); }
+
+  /* 抽屉 */
+  .mask{ position:fixed; inset:0; background:rgba(10,12,18,.42); z-index:50; opacity:0; transition:opacity .2s; }
+  .mask.show{ opacity:1; }
+  @media (prefers-color-scheme: dark){ .mask{ background:rgba(0,0,0,.66); } }
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:51;
+    background:var(--card); border-radius:22px 22px 0 0;
+    max-height:86vh; display:flex; flex-direction:column;
+    transform:translateY(102%); transition:transform .28s cubic-bezier(.32,.72,0,1);
+    padding-bottom:env(safe-area-inset-bottom);
+    box-shadow:0 -8px 40px rgba(10,12,18,.16);
+  }
+  .sheet.show{ transform:translateY(0); }
+  .sheet-in{ max-width:560px; width:100%; margin:0 auto; display:flex; flex-direction:column; min-height:0; }
+  .sheet-head{ display:flex; align-items:center; justify-content:space-between; padding:16px 20px 12px; flex:none; }
+  .sheet-head b{ font-size:16px; font-weight:650; }
+  .sheet-head button{ font-size:13px; color:var(--muted); padding:6px 8px; border-radius:8px; }
+  .sheet-body{ overflow-y:auto; padding:0 20px 22px; -webkit-overflow-scrolling:touch; }
+
+  .pk-group{ margin-bottom:16px; }
+  .pk-title{ display:flex; align-items:center; gap:7px; font-size:12px; font-weight:650; color:var(--muted); letter-spacing:.05em; margin-bottom:9px; }
+  .pk-title i{ width:8px; height:8px; border-radius:2px; }
+  .pk-chips{ display:flex; flex-wrap:wrap; gap:8px; }
+  .pk-chips .chip{ background:var(--soft); border-color:transparent; box-shadow:none; padding:10px 14px; font-size:14px; }
+  .chip-new{ color:var(--accent); border:1px dashed rgba(79,70,229,.4) !important; background:transparent !important; }
+  .chip-input{ width:112px; background:var(--soft); border:1px solid var(--accent); border-radius:11px; padding:10px 12px; font-size:14px; }
+  .chip-input:focus{ outline:none; }
+
+  /* 表单 */
+  .fld{ margin-bottom:13px; }
+  .fld label{ display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:6px; letter-spacing:.03em; }
+  .fld input,.fld select{
+    width:100%; background:var(--soft); border:1px solid transparent; border-radius:11px;
+    padding:11px 12px; font-size:15px; appearance:none; -webkit-appearance:none;
+  }
+  .fld input:focus,.fld select:focus{ outline:none; border-color:var(--accent); background:var(--card); }
+  .fld-2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .dur-quick{ display:flex; gap:7px; margin:-4px 0 13px; flex-wrap:wrap; }
+  .dur-quick button{ font-size:12.5px; padding:6px 11px; border-radius:8px; background:var(--soft); color:var(--muted); font-weight:550; }
+  .dur-quick button:active{ background:rgba(79,70,229,.12); color:var(--accent); }
+  .warn{ background:rgba(217,119,6,.1); color:#b45309; border-radius:10px; padding:9px 12px; font-size:12.5px; margin-bottom:13px; }
+  @media (prefers-color-scheme: dark){ .warn{ color:#fbbf24; } }
+  .actions{ display:flex; gap:9px; margin-top:6px; }
+  .btn{ flex:1; padding:13px; border-radius:12px; font-size:15px; font-weight:650; text-align:center; }
+  .btn.main{ background:var(--accent); color:#fff; box-shadow:0 6px 18px rgba(79,70,229,.28); }
+  .btn.main:active{ transform:scale(.985); }
+  .btn.sub{ background:var(--soft); color:var(--text); }
+  .btn.del{ background:rgba(229,72,77,.1); color:var(--danger); flex:none; padding:13px 18px; }
+
+  .toast{
+    position:fixed; left:50%; bottom:96px; transform:translate(-50%,14px);
+    background:rgba(22,24,30,.94); color:#fff; font-size:13.5px; padding:10px 16px; border-radius:11px;
+    z-index:90; opacity:0; transition:.22s cubic-bezier(.4,0,.2,1); pointer-events:none; max-width:86vw; text-align:center;
+  }
+  .toast.show{ opacity:1; transform:translate(-50%,0); }
+
+  @media (min-width:600px){
+    .start-btn{ width:170px; height:170px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="hdr">
+    <div>
+      <div class="hdr-date" id="hdrDate">—</div>
+      <div class="hdr-total"><span id="hdrTotal">0m</span><small>今天</small></div>
+    </div>
+    <div class="hdr-right" id="hdrRight"></div>
+  </header>
+
+  <!-- 记录 -->
+  <main id="view-record">
+    <div class="timer-card">
+      <span class="t-dot" id="tDot"></span>
+      <div class="t-body">
+        <div class="t-label" id="tLabel">未开始</div>
+        <div class="t-cat" id="tCat">点下方按钮开始记录</div>
+      </div>
+      <div style="text-align:right">
+        <div class="t-time num" id="tTime">00:00</div>
+      </div>
+      <button class="t-switch" id="btnSwitch" hidden>切换</button>
+    </div>
+
+    <div class="start-wrap">
+      <button class="start-btn" id="btnStart">
+        <svg viewBox="0 0 24 24" fill="currentColor" id="btnStartIcon"><path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/></svg>
+        <span id="btnStartTxt">开始</span>
+        <span class="sb-sub" id="btnStartSub">记一笔</span>
+      </button>
+    </div>
+
+    <div class="quick">
+      <button class="qa primary" id="btnManual">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+        补记
+      </button>
+      <button class="qa" id="btnExport">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        导出
+      </button>
+      <button class="qa" id="btnImport">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="m7 14 5-5 5 5"/><path d="M5 3h14"/></svg>
+        导入
+      </button>
+    </div>
+
+    <div class="recent" id="recentWrap" hidden>
+      <div class="sec-label">常用标签</div>
+      <div class="chips" id="recentChips"></div>
+    </div>
+
+    <section class="list-sec">
+      <div class="sec-head">
+        <div class="day-nav">
+          <button data-day="-1" id="dayPrev">‹</button>
+          <span id="listDayLabel">今天</span>
+          <button data-day="1" id="dayNext">›</button>
+        </div>
+        <span class="sum num" id="listSum"></span>
+      </div>
+      <div id="entryList"></div>
+    </section>
+  </main>
+
+  <!-- 统计 -->
+  <main id="view-stats" hidden>
+    <div class="seg" id="rangeSeg">
+      <button data-range="today" class="on">今天</button>
+      <button data-range="week">本周</button>
+      <button data-range="month">本月</button>
+      <button data-range="all">全部</button>
+    </div>
+    <div class="hero">
+      <div class="hero-num" id="statTotal">0m</div>
+      <div class="hero-meta" id="statMeta">—</div>
+    </div>
+    <div class="card" id="donutCard">
+      <div class="card-title">一级分类占比</div>
+      <div class="donut-wrap">
+        <div class="donut" id="donut"></div>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">分类明细</div>
+      <div id="catBars"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">二级标签排行</div>
+      <div id="subBars"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">近 7 天</div>
+      <div class="bars7" id="bars7"></div>
+    </div>
+  </main>
+
+  <!-- 设置 -->
+  <main id="view-settings" hidden>
+    <div class="card">
+      <div class="card-title">分类与标签</div>
+      <div id="catEditor"></div>
+      <button class="ce-add" id="btnAddCat" style="margin-top:6px">+ 新增一级分类</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">多端同步</div>
+      <button class="row-btn" id="btnExport2">
+        <span class="rb-l"><span>导出数据</span><span class="rb-s">生成 .json 文件，可发送到另一台设备</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <button class="row-btn" id="btnImport2">
+        <span class="rb-l"><span>导入并合并</span><span class="rb-s">同一记录以修改时间较新的为准</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <p class="hint">手机与电脑各自记录后，把 A 端的导出文件发给 B 端导入即可合并。两端都导入对方的文件，即可双向同步。</p>
+      <p class="hint" id="exportHint"></p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">数据</div>
+      <div id="dataInfo"></div>
+      <button class="row-btn" id="btnPurge">
+        <span class="rb-l"><span>清理回收站</span><span class="rb-s">删除 30 天前标记为删除的记录</span></span>
+        <span class="arrow">›</span>
+      </button>
+      <button class="row-btn danger" id="btnReset">
+        <span class="rb-l"><span>清空所有数据</span><span class="rb-s">不可恢复，请先导出备份</span></span>
+        <span class="arrow">›</span>
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">使用说明</div>
+      <p class="hint"><b>开始</b>：点大按钮选一个标签，立即开始计时；计时中再选另一个标签会自动切段。</p>
+      <p class="hint"><b>补记</b>：忘了记就点「补记」，选好时间段和标签即可。</p>
+      <p class="hint"><b>二级标签</b>：一级分类用来出图表，二级标签记录具体做了什么。可在上方随时增删。</p>
+      <p class="hint"><b>数据存在本机浏览器</b>，换设备或清理浏览器数据前，请先导出备份。</p>
+    </div>
+  </main>
+</div>
+
+<nav class="tabbar">
+  <div class="tabbar-inner">
+    <button class="tab on" data-view="record">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+      记录
+    </button>
+    <button class="tab" data-view="stats">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
+      统计
+    </button>
+    <button class="tab" data-view="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      设置
+    </button>
+  </div>
+</nav>
+
+<div class="mask" id="mask" hidden></div>
+
+<div class="sheet" id="sheetPicker" hidden>
+  <div class="sheet-in">
+    <div class="sheet-head"><b>选择标签开始</b><button data-close>取消</button></div>
+    <div class="sheet-body" id="pickerBody"></div>
+  </div>
+</div>
+
+<div class="sheet" id="sheetForm" hidden>
+  <div class="sheet-in">
+    <div class="sheet-head"><b id="formTitle">补记</b><button data-close>取消</button></div>
+    <div class="sheet-body">
+      <form id="entryForm" novalidate>
+        <div class="fld">
+          <label>日期</label>
+          <input type="date" id="fDate">
+        </div>
+        <div class="fld-2">
+          <div class="fld"><label>开始</label><input type="time" id="fStart"></div>
+          <div class="fld"><label>结束</label><input type="time" id="fEnd"></div>
+        </div>
+        <div class="dur-quick" id="durQuick">
+          <button type="button" data-dur="15">15 分钟</button>
+          <button type="button" data-dur="30">30 分钟</button>
+          <button type="button" data-dur="45">45 分钟</button>
+          <button type="button" data-dur="60">1 小时</button>
+          <button type="button" data-dur="90">1.5 小时</button>
+        </div>
+        <div class="fld"><label>一级分类</label><select id="fCat"></select></div>
+        <div class="fld"><label>二级标签</label><select id="fSub"></select></div>
+        <div class="fld"><label>备注（可选）</label><input type="text" id="fNote" maxlength="200" placeholder="做了什么"></div>
+        <div class="warn" id="fWarn" hidden></div>
+        <div class="actions">
+          <button type="button" class="btn del" id="btnFormDel" hidden>删除</button>
+          <button type="submit" class="btn main" id="btnFormSave">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".json,application/json" hidden>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================= 常量 ================= */
+  var DB_KEY = 'time-tally.v1';
+  var SCHEMA = 1;
+  var DAY = 86400000;
+  var DEMO = new URLSearchParams(location.search).has('demo');
+  var INIT_VIEW = (function () {
+    var v = new URLSearchParams(location.search).get('view');
+    return (v === 'stats' || v === 'settings') ? v : 'record';
+  })();
+
+  var DEFAULT_CATS = [
+    { name: '工作', color: '#4f6df5', subs: ['写代码', '开会', '沟通', '文档', '排障'] },
+    { name: '学习', color: '#8b5cf6', subs: ['阅读', '课程', '练习', '笔记'] },
+    { name: '生活', color: '#10b981', subs: ['吃饭', '家务', '通勤', '采买'] },
+    { name: '运动', color: '#f59e0b', subs: ['跑步', '健身', '拉伸'] },
+    { name: '休息', color: '#64748b', subs: ['午睡', '刷手机', '发呆'] }
+  ];
+
+  /* ================= 工具 ================= */
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function uid() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+    return 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function normName(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
+
+  function fmtDur(ms) {
+    var sec = Math.max(0, Math.round(ms / 1000));
+    if (sec < 60) return sec > 0 ? sec + 's' : '0m';
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    if (h > 0) return h + 'h ' + pad(m) + 'm';
+    return m + 'm';
+  }
+  function fmtDurLong(ms) {
+    var min = Math.round(ms / 60000);
+    if (min < 1) return '不足 1 分钟';
+    var h = Math.floor(min / 60), m = min % 60;
+    var out = '';
+    if (h) out += h + ' 小时 ';
+    if (m || !h) out += m + ' 分';
+    return out.trim();
+  }
+  function fmtHMS(ms) {
+    var sec = Math.max(0, Math.floor(ms / 1000));
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return (h ? pad(h) + ':' : '') + pad(m) + ':' + pad(s);
+  }
+  function fmtClock(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function fmtDayTitle(ts) {
+    return (new Date(ts).getMonth() + 1) + '月' + new Date(ts).getDate() + '日';
+  }
+  function fmtDateFull(ts) {
+    var d = new Date(ts);
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日 · 周' + '日一二三四五六'[d.getDay()];
+  }
+  function startOfDay(ts) { var d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
+  function startOfWeek(ts) {
+    var d = new Date(startOfDay(ts));
+    var wd = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - wd);
+    return d.getTime();
+  }
+  function startOfMonth(ts) { var d = new Date(ts); d.setDate(1); d.setHours(0, 0, 0, 0); return d.getTime(); }
+  function dayKey(ts) { var d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function dateInputVal(ts) { var d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function timeInputVal(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function parseLocal(dateStr, timeStr) {
+    var a = String(dateStr).split('-').map(Number);
+    var b = String(timeStr).split(':').map(Number);
+    return new Date(a[0], a[1] - 1, a[2], b[0] || 0, b[1] || 0, 0, 0).getTime();
+  }
+
+  /* ================= 状态 ================= */
+  var state = null;
+  var storageOK = true;
+  var listDay = 0;
+  var range = 'today';
+  var pickerMode = 'start';
+  var editingId = null;
+  var lastDayKey = dayKey(Date.now());
+
+  function blankState() {
+    return {
+      v: SCHEMA,
+      cats: DEFAULT_CATS.map(function (c) {
+        return {
+          id: uid(), name: c.name, color: c.color,
+          subs: c.subs.map(function (n) { return { id: uid(), name: n }; })
+        };
+      }),
+      entries: [],
+      timer: null,
+      meta: { recent: [], lastExportAt: 0 }
+    };
+  }
+
+  function load() {
+    var raw = null;
+    try { raw = localStorage.getItem(DB_KEY); } catch (e) { storageOK = false; }
+    var s = null;
+    if (raw) { try { s = JSON.parse(raw); } catch (e) { s = null; } }
+    if (!s || !Array.isArray(s.cats) || !s.cats.length) s = blankState();
+
+    s.entries = (Array.isArray(s.entries) ? s.entries : []).filter(function (e) {
+      return e && e.id && typeof e.start === 'number';
+    });
+    s.cats = s.cats.filter(function (c) { return c && c.id; }).map(function (c) {
+      c.name = String(c.name || '未命名');
+      c.color = c.color || '#94a3b8';
+      c.subs = (Array.isArray(c.subs) ? c.subs : []).filter(function (x) { return x && x.id; });
+      return c;
+    });
+    if (!s.meta) s.meta = { recent: [], lastExportAt: 0 };
+    if (!Array.isArray(s.meta.recent)) s.meta.recent = [];
+
+    // 计时器失效修复
+    if (s.timer) {
+      var te = s.entries.find(function (x) { return x.id === s.timer.entryId; });
+      if (!te || te.end != null) s.timer = null;
+    }
+    // 无人认领的未结束条目：收缩为 0 时长
+    s.entries.forEach(function (e) {
+      if (e.end == null && !(s.timer && s.timer.entryId === e.id)) {
+        e.end = e.start;
+        e.updatedAt = e.updatedAt || Date.now();
+      }
+    });
+    return s;
+  }
+
+  function save() {
+    if (DEMO) return; // 预览模式只读，不落盘
+    try { localStorage.setItem(DB_KEY, JSON.stringify(state)); }
+    catch (e) { storageOK = false; toast('无法写入本地存储，数据可能不会保存'); }
+  }
+
+  function demoState() {
+    var s = blankState();
+    var byName = {};
+    s.cats.forEach(function (c) { byName[c.name] = c; });
+    function ref(catName, subName) {
+      var c = byName[catName];
+      if (!c) return { c: '', s: '' };
+      var sb = c.subs.filter(function (x) { return x.name === subName; })[0] || c.subs[0];
+      return { c: c.id, s: sb ? sb.id : '' };
+    }
+    var now = Date.now();
+    var t0 = startOfDay(now);
+    var plan = [
+      [0, 9 * 60 + 10, 55, '工作', '写代码'],
+      [0, 10 * 60 + 15, 45, '工作', '开会'],
+      [0, 11 * 60 + 5, 50, '工作', '排障'],
+      [0, 12 * 60 + 10, 50, '生活', '吃饭'],
+      [0, 13 * 60 + 40, 70, '工作', '写代码'],
+      [0, 15 * 60, 40, '学习', '阅读'],
+      [-1, 9 * 60 + 30, 90, '工作', '写代码'],
+      [-1, 11 * 60 + 20, 40, '工作', '沟通'],
+      [-1, 14 * 60, 60, '学习', '课程'],
+      [-1, 19 * 60 + 30, 45, '运动', '跑步'],
+      [-2, 10 * 60, 120, '工作', '写代码'],
+      [-2, 14 * 60, 60, '学习', '练习'],
+      [-2, 20 * 60, 40, '休息', '刷手机'],
+      [-3, 9 * 60, 60, '工作', '开会'],
+      [-3, 13 * 60, 90, '工作', '写代码'],
+      [-3, 20 * 60, 40, '生活', '家务'],
+      [-4, 9 * 60 + 30, 75, '工作', '写代码'],
+      [-4, 16 * 60, 50, '学习', '阅读'],
+      [-5, 10 * 60, 100, '工作', '写代码'],
+      [-5, 15 * 60, 45, '生活', '采买'],
+      [-6, 11 * 60, 60, '工作', '文档'],
+      [-6, 18 * 60, 40, '运动', '健身']
+    ];
+    plan.forEach(function (p) {
+      var st = t0 + p[0] * DAY + p[1] * 60000;
+      var en = st + p[2] * 60000;
+      if (st >= now) return;
+      if (en > now) en = now;
+      if (en - st < 60000) return;
+      var r = ref(p[3], p[4]);
+      s.entries.push({
+        id: uid(), start: st, end: en, catId: r.c, subId: r.s,
+        note: '', src: 'manual', createdAt: st, updatedAt: st, deletedAt: null
+      });
+    });
+    s.meta.recent = [
+      ref('工作', '写代码').s, ref('学习', '阅读').s, ref('工作', '开会').s,
+      ref('生活', '吃饭').s, ref('运动', '跑步').s
+    ].filter(Boolean);
+    return s;
+  }
+
+  /* ================= 查询 ================= */
+  function entryById(id) {
+    for (var i = 0; i < state.entries.length; i++) if (state.entries[i].id === id) return state.entries[i];
+    return null;
+  }
+  function findCat(id) {
+    for (var i = 0; i < state.cats.length; i++) if (state.cats[i].id === id) return state.cats[i];
+    return null;
+  }
+  function findSub(subId) {
+    for (var i = 0; i < state.cats.length; i++) {
+      var c = state.cats[i];
+      for (var j = 0; j < c.subs.length; j++) {
+        if (c.subs[j].id === subId) return { cat: c, sub: c.subs[j] };
+      }
+    }
+    return null;
+  }
+  function catOfEntry(e) { return findCat(e.catId) || { name: '未分类', color: '#94a3b8', subs: [] }; }
+  function subOfEntry(e) {
+    var f = findSub(e.subId);
+    return f ? f.sub : { name: '未标注', id: e.subId };
+  }
+  function activeEntry() {
+    if (!state.timer) return null;
+    var e = entryById(state.timer.entryId);
+    return (e && e.end == null) ? e : null;
+  }
+  function liveEntries() {
+    return state.entries.filter(function (e) { return !e.deletedAt; });
+  }
+
+  /* ================= 时间计算（纯函数） ================= */
+  function entryEnd(e, now) { return e.end == null ? now : e.end; }
+
+  function clipMs(e, from, to, now) {
+    var s = Math.max(e.start, from);
+    var en = Math.min(entryEnd(e, now), to);
+    return en > s ? en - s : 0;
+  }
+
+  function sumRange(entries, from, to, now) {
+    var t = 0;
+    for (var i = 0; i < entries.length; i++) t += clipMs(entries[i], from, to, now);
+    return t;
+  }
+
+  function groupRange(entries, from, to, now, keyFn) {
+    var map = new Map();
+    var total = 0;
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var d = clipMs(e, from, to, now);
+      if (d <= 0) continue;
+      total += d;
+      var k = keyFn(e);
+      var cur = map.get(k) || { key: k, ms: 0, count: 0 };
+      cur.ms += d;
+      cur.count += 1;
+      map.set(k, cur);
+    }
+    return { total: total, items: Array.from(map.values()).sort(function (a, b) { return b.ms - a.ms; }) };
+  }
+
+  function rangeBounds(key, now) {
+    if (key === 'today') return { from: startOfDay(now), to: now };
+    if (key === 'week') return { from: startOfWeek(now), to: now };
+    if (key === 'month') return { from: startOfMonth(now), to: now };
+    var min = now, max = 0;
+    for (var i = 0; i < state.entries.length; i++) {
+      var e = state.entries[i];
+      if (e.deletedAt) continue;
+      if (e.start < min) min = e.start;
+      var en = entryEnd(e, now);
+      if (en > max) max = en;
+    }
+    if (!state.entries.length) return { from: startOfDay(now), to: now };
+    return { from: startOfDay(min), to: Math.max(max, now) };
+  }
+
+  function overlaps(start, end, excludeId) {
+    return state.entries.filter(function (e) {
+      return !e.deletedAt && e.id !== excludeId && e.end != null && e.start < end && e.end > start;
+    });
+  }
+
+  /* ================= 写入 ================= */
+  function pushRecent(subId) {
+    if (!subId) return;
+    var r = state.meta.recent.filter(function (x) { return x !== subId; });
+    r.unshift(subId);
+    state.meta.recent = r.slice(0, 8);
+  }
+
+  function startTimer(catId, subId, at) {
+    at = at || Date.now();
+    if (state.timer) closeTimer(at);
+    var e = {
+      id: uid(), start: at, end: null, catId: catId, subId: subId,
+      note: '', src: 'timer', createdAt: at, updatedAt: at, deletedAt: null
+    };
+    state.entries.push(e);
+    state.timer = { entryId: e.id };
+    pushRecent(subId);
+    save();
+  }
+
+  function closeTimer(at) {
+    if (!state.timer) return null;
+    at = at || Date.now();
+    var e = entryById(state.timer.entryId);
+    state.timer = null;
+    if (e && e.end == null) {
+      var dur = at - e.start;
+      if (dur < 1000) {
+        // 太短，直接丢弃，避免垃圾记录
+        state.entries = state.entries.filter(function (x) { return x.id !== e.id; });
+      } else {
+        e.end = at;
+        e.updatedAt = at;
+      }
+    }
+    save();
+    return e;
+  }
+
+  function addEntry(start, end, catId, subId, note) {
+    var now = Date.now();
+    var e = {
+      id: uid(), start: start, end: end, catId: catId, subId: subId,
+      note: note || '', src: 'manual', createdAt: now, updatedAt: now, deletedAt: null
+    };
+    state.entries.push(e);
+    pushRecent(subId);
+    save();
+    return e;
+  }
+
+  function updateEntry(id, patch) {
+    var e = entryById(id);
+    if (!e) return;
+    Object.assign(e, patch, { updatedAt: Date.now() });
+    save();
+  }
+
+  function deleteEntry(id) {
+    var e = entryById(id);
+    if (!e) return;
+    if (state.timer && state.timer.entryId === id) state.timer = null;
+    e.deletedAt = Date.now();
+    e.updatedAt = Date.now();
+    save();
+  }
+
+  /* ================= 导入导出 ================= */
+  function exportPayload() {
+    var now = Date.now();
+    var entries = state.entries.map(function (e) {
+      var c = Object.assign({}, e);
+      if (c.end == null) c.end = now; // 运行中的条目导出时按当前时刻封口
+      return c;
+    });
+    return {
+      app: 'time-tally', schema: SCHEMA, exportedAt: now,
+      device: navigator.userAgent.indexOf('Mobile') >= 0 ? 'mobile' : 'desktop',
+      cats: clone(state.cats),
+      entries: entries
+    };
+  }
+
+  function mergePayload(target, payload) {
+    var rep = { added: 0, updated: 0, skipped: 0, closed: 0, newCats: 0, newSubs: 0, remapped: 0 };
+    var incCats = Array.isArray(payload.cats) ? payload.cats : [];
+    var incEntries = Array.isArray(payload.entries) ? payload.entries : [];
+    var catMap = new Map();
+    var subMap = new Map();
+
+    incCats.forEach(function (c) {
+      if (!c || !c.id) return;
+      var local = null;
+      for (var i = 0; i < target.cats.length; i++) {
+        if (target.cats[i].id === c.id) { local = target.cats[i]; break; }
+      }
+      if (!local) {
+        for (var j = 0; j < target.cats.length; j++) {
+          if (normName(target.cats[j].name) === normName(c.name)) { local = target.cats[j]; break; }
+        }
+      }
+      if (!local) {
+        local = { id: uid(), name: String(c.name || '未命名'), color: c.color || '#94a3b8', subs: [] };
+        target.cats.push(local);
+        rep.newCats++;
+      }
+      catMap.set(c.id, local.id);
+
+      (c.subs || []).forEach(function (sub) {
+        if (!sub || !sub.id) return;
+        var ls = null;
+        for (var a = 0; a < local.subs.length; a++) {
+          if (local.subs[a].id === sub.id) { ls = local.subs[a]; break; }
+        }
+        if (!ls) {
+          for (var b = 0; b < local.subs.length; b++) {
+            if (normName(local.subs[b].name) === normName(sub.name)) { ls = local.subs[b]; break; }
+          }
+        }
+        if (!ls) {
+          ls = { id: uid(), name: String(sub.name || '未命名') };
+          local.subs.push(ls);
+          rep.newSubs++;
+        }
+        subMap.set(sub.id, ls.id);
+      });
+    });
+
+    var byId = new Map();
+    target.entries.forEach(function (e) { byId.set(e.id, e); });
+    var now = Date.now();
+
+    incEntries.forEach(function (raw) {
+      if (!raw || !raw.id || typeof raw.start !== 'number') return;
+      var e = {
+        id: raw.id,
+        start: raw.start,
+        end: (typeof raw.end === 'number') ? raw.end : null,
+        catId: catMap.get(raw.catId) || raw.catId,
+        subId: subMap.get(raw.subId) || raw.subId,
+        note: raw.note || '',
+        src: raw.src || 'import',
+        createdAt: raw.createdAt || now,
+        updatedAt: raw.updatedAt || 0,
+        deletedAt: raw.deletedAt || null
+      };
+      if (e.catId !== raw.catId || e.subId !== raw.subId) rep.remapped++;
+
+      if (target.timer && target.timer.entryId === e.id) { rep.skipped++; return; }
+
+      if (e.end == null) { e.end = e.start; rep.closed++; }
+
+      var cur = byId.get(e.id);
+      if (!cur) {
+        target.entries.push(e);
+        byId.set(e.id, e);
+        rep.added++;
+      } else if (e.updatedAt > (cur.updatedAt || 0)) {
+        Object.assign(cur, e);
+        rep.updated++;
+      } else {
+        rep.skipped++;
+      }
+    });
+
+    return rep;
+  }
+
+  function doExport() {
+    var payload = exportPayload();
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    var d = new Date();
+    var name = 'time-tally-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
+      '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 1000);
+    state.meta.lastExportAt = Date.now();
+    save();
+    renderDataInfo();
+    renderExportHint();
+    toast('已导出 ' + name);
+  }
+
+  function doImportFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var data;
+      try { data = JSON.parse(String(reader.result)); }
+      catch (e) { toast('文件不是有效的 JSON'); return; }
+      if (!data || !Array.isArray(data.entries)) { toast('这不是时间账本的导出文件'); return; }
+
+      var rep = mergePayload(state, data);
+      save();
+      renderAll();
+      switchView('record');
+
+      var parts = [];
+      if (rep.added) parts.push('新增 ' + rep.added + ' 条');
+      if (rep.updated) parts.push('更新 ' + rep.updated + ' 条');
+      if (rep.newCats) parts.push('新分类 ' + rep.newCats + ' 个');
+      if (rep.newSubs) parts.push('新标签 ' + rep.newSubs + ' 个');
+      if (!parts.length) parts.push('没有新的数据');
+      var msg = '导入完成：' + parts.join('，');
+      if (rep.closed) msg += '。有 ' + rep.closed + ' 条未结束的记录已按 0 分钟导入，请在列表中点开补全时长';
+      toast(msg, 4200);
+    };
+    reader.onerror = function () { toast('读取文件失败'); };
+    reader.readAsText(file);
+  }
+
+  /* ================= 渲染：记录页 ================= */
+  var toastTimer = null;
+  function toast(msg, ms) {
+    var el = $('#toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, ms || 2400);
+  }
+
+  function renderHeader() {
+    var now = Date.now();
+    $('#hdrDate').textContent = fmtDateFull(now);
+    var entries = liveEntries();
+    var t = sumRange(entries, startOfDay(now), now, now);
+    $('#hdrTotal').textContent = fmtDur(t);
+    var cnt = entries.filter(function (e) {
+      var en = entryEnd(e, now);
+      return e.start < now && en > startOfDay(now);
+    }).length;
+    $('#hdrRight').innerHTML = DEMO
+      ? '预览模式<br>数据不保存'
+      : (cnt ? cnt + ' 条记录' : '今天还没有记录');
+  }
+
+  function renderTimerCard() {
+    var now = Date.now();
+    var e = activeEntry();
+    var dot = $('#tDot'), label = $('#tLabel'), cat = $('#tCat'), time = $('#tTime');
+    var btn = $('#btnStart'), btxt = $('#btnStartTxt'), bsub = $('#btnStartSub'), bicon = $('#btnStartIcon');
+    var sw = $('#btnSwitch');
+
+    if (e) {
+      var c = catOfEntry(e), s = subOfEntry(e);
+      dot.classList.add('on');
+      label.textContent = '正在记录';
+      cat.innerHTML = esc(c.name) + '<span class="sep">·</span>' + esc(s.name);
+      time.textContent = fmtHMS(now - e.start);
+      time.style.display = '';
+      btn.classList.add('running');
+      btxt.textContent = '停止';
+      bsub.textContent = '结束这一段';
+      bicon.innerHTML = '<rect x="6" y="6" width="12" height="12" rx="2.5"/>';
+      sw.hidden = false;
+    } else {
+      dot.classList.remove('on');
+      label.textContent = '未开始';
+      cat.textContent = '点下方按钮开始记录';
+      time.textContent = '00:00';
+      time.style.display = '';
+      btn.classList.remove('running');
+      btxt.textContent = '开始';
+      bsub.textContent = '记一笔';
+      bicon.innerHTML = '<path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/>';
+      sw.hidden = true;
+    }
+
+    // 超长计时提醒
+    if (e) {
+      var hours = (now - e.start) / 3600000;
+      if (hours >= 8) {
+        label.textContent = '已连续 ' + Math.floor(hours) + ' 小时';
+        label.style.color = '#d97706';
+      } else {
+        label.style.color = '';
+      }
+    } else {
+      label.style.color = '';
+    }
+  }
+
+  function renderRecent() {
+    var wrap = $('#recentWrap');
+    var list = [];
+    for (var i = 0; i < state.meta.recent.length && list.length < 6; i++) {
+      var f = findSub(state.meta.recent[i]);
+      if (f) list.push(f);
+    }
+    if (!list.length) { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    var act = activeEntry();
+    $('#recentChips').innerHTML = list.map(function (f) {
+      var on = act && act.subId === f.sub.id;
+      return '<button class="chip" data-quick="' + esc(f.cat.id) + '|' + esc(f.sub.id) + '" style="--c:' + esc(f.cat.color) + '">' +
+        '<i></i>' + esc(f.sub.name) + '<span class="chip-cat">' + esc(f.cat.name) + '</span>' +
+        (on ? ' <span style="color:var(--accent)">●</span>' : '') + '</button>';
+    }).join('');
+  }
+
+  function renderList() {
+    var now = Date.now();
+    var base = startOfDay(now) + listDay * DAY;
+    var from = base, to = base + DAY;
+    var all = liveEntries();
+    var items = all.filter(function (e) {
+      return e.start < to && entryEnd(e, now) > from;
+    }).sort(function (a, b) { return b.start - a.start; });
+
+    var label = $('#listDayLabel');
+    if (listDay === 0) label.textContent = '今天';
+    else if (listDay === -1) label.textContent = '昨天';
+    else label.textContent = fmtDayTitle(base);
+    $('#dayNext').disabled = listDay >= 0;
+
+    var total = sumRange(items, from, to, now);
+    $('#listSum').textContent = items.length ? ('共 ' + fmtDur(total)) : '';
+
+    var box = $('#entryList');
+    if (!items.length) {
+      box.innerHTML = '<div class="empty">' + (listDay === 0 ? '今天还没有记录<br>点上面的「开始」或「补记」' : '这一天没有记录') + '</div>';
+      return;
+    }
+
+    box.innerHTML = items.map(function (e) {
+      var c = catOfEntry(e), s = subOfEntry(e);
+      var s0 = Math.max(e.start, from), e0 = Math.min(entryEnd(e, now), to);
+      var live = e.end == null;
+      var ov = e.end != null && overlaps(e.start, e.end, e.id).length > 0;
+      return '<div class="entry' + (live ? ' entry-live' : '') + '"' + (live ? ' data-live="1"' : '') +
+        ' data-open="' + esc(e.id) + '">' +
+        '<div class="entry-bar" style="background:' + esc(c.color) + '"></div>' +
+        '<div class="entry-main">' +
+        '<div class="entry-top">' +
+        '<span class="entry-time num">' + fmtClock(s0) + ' – ' + (live ? '现在' : fmtClock(e0)) + '</span>' +
+        '<span class="entry-dur num">' + (live ? fmtHMS(now - e.start) : fmtDur(e0 - s0)) + '</span>' +
+        '</div>' +
+        '<div class="entry-cat"><i style="background:' + esc(c.color) + '"></i>' + esc(c.name) +
+        '<span class="sep">·</span>' + esc(s.name) +
+        (ov ? ' <span class="warn-dot">重叠</span>' : '') + '</div>' +
+        (e.note ? '<div class="entry-note">' + esc(e.note) + '</div>' : '') +
+        '</div></div>';
+    }).join('');
+  }
+
+  /* ================= 渲染：统计页 ================= */
+  function renderStats() {
+    var now = Date.now();
+    var b = rangeBounds(range, now);
+    var entries = liveEntries();
+    var g = groupRange(entries, b.from, b.to, now, function (e) { return e.catId; });
+
+    $('#statTotal').textContent = fmtDur(g.total);
+    var n = 0;
+    entries.forEach(function (e) { if (clipMs(e, b.from, b.to, now) > 0) n++; });
+    var avg = n ? g.total / n : 0;
+    var spanDays = Math.floor((startOfDay(b.to) - startOfDay(b.from)) / DAY) + 1;
+    $('#statMeta').textContent = n
+      ? (n + ' 条记录 · 单条平均 ' + fmtDur(avg) + ' · 覆盖 ' + spanDays + ' 天')
+      : '这个区间还没有记录';
+
+    // 环形图
+    var donut = $('#donut'), legend = $('#legend');
+    if (!g.total) {
+      donut.style.background = 'var(--soft)';
+      donut.innerHTML = '';
+      legend.innerHTML = '<div style="color:var(--muted);font-size:13px">暂无数据</div>';
+    } else {
+      var stops = [], acc = 0;
+      var top = g.items.slice(0, 6);
+      top.forEach(function (it) {
+        var c = findCat(it.key) || { name: '未分类', color: '#94a3b8' };
+        var pct = it.ms / g.total * 100;
+        stops.push(esc(c.color) + ' ' + acc.toFixed(2) + '% ' + (acc + pct).toFixed(2) + '%');
+        acc += pct;
+      });
+      if (acc < 99.99) stops.push('var(--soft) ' + acc.toFixed(2) + '% 100%');
+      donut.style.background = 'conic-gradient(' + stops.join(',') + ')';
+      donut.innerHTML = '<div class="donut-c"><b>' + esc(fmtDur(g.total)) + '</b><span>' + g.items.length + ' 类</span></div>';
+      legend.innerHTML = top.map(function (it) {
+        var c = findCat(it.key) || { name: '未分类', color: '#94a3b8' };
+        return '<div class="lg-row"><i style="background:' + esc(c.color) + '"></i>' +
+          '<span class="lg-n">' + esc(c.name) + '</span>' +
+          '<span class="lg-v">' + Math.round(it.ms / g.total * 100) + '%</span></div>';
+      }).join('');
+    }
+
+    // 分类明细
+    var catBars = $('#catBars');
+    if (!g.items.length) {
+      catBars.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">暂无数据</div>';
+    } else {
+      var max = g.items[0].ms;
+      catBars.innerHTML = g.items.map(function (it) {
+        var c = findCat(it.key) || { name: '未分类', color: '#94a3b8' };
+        var w = max ? (it.ms / max * 100) : 0;
+        return '<div class="bar-row"><div class="bar-top"><span class="bn"><i style="background:' + esc(c.color) + '"></i>' + esc(c.name) +
+          '</span><span class="bv">' + esc(fmtDur(it.ms)) + '</span></div>' +
+          '<div class="track"><div class="fill" style="width:' + w.toFixed(1) + '%;background:' + esc(c.color) + '"></div></div></div>';
+      }).join('');
+    }
+
+    // 二级排行
+    var sg = groupRange(entries, b.from, b.to, now, function (e) { return e.subId || 'none'; });
+    var subBars = $('#subBars');
+    if (!sg.items.length) {
+      subBars.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:4px 0">暂无数据</div>';
+    } else {
+      var smax = sg.items[0].ms;
+      subBars.innerHTML = sg.items.slice(0, 10).map(function (it) {
+        var f = findSub(it.key);
+        var c = f ? f.cat : { name: '未分类', color: '#94a3b8' };
+        var name = f ? f.sub.name : '未标注';
+        var w = smax ? (it.ms / smax * 100) : 0;
+        return '<div class="bar-row"><div class="bar-top"><span class="bn"><i style="background:' + esc(c.color) + '"></i>' + esc(name) +
+          ' <span style="color:var(--muted);font-size:11.5px">' + esc(c.name) + '</span></span>' +
+          '<span class="bv">' + esc(fmtDur(it.ms)) + '</span></div>' +
+          '<div class="track"><div class="fill" style="width:' + w.toFixed(1) + '%;background:' + esc(c.color) + ';opacity:.55"></div></div></div>';
+      }).join('');
+    }
+
+    // 近 7 天
+    var days = [];
+    var today0 = startOfDay(now);
+    var maxD = 0;
+    for (var i = 6; i >= 0; i--) {
+      var d0 = today0 - i * DAY;
+      var ms = sumRange(entries, d0, d0 + DAY, now);
+      if (ms > maxD) maxD = ms;
+      days.push({ ms: ms, ts: d0, today: i === 0 });
+    }
+    $('#bars7').innerHTML = days.map(function (d) {
+      var h = maxD ? Math.max(2, d.ms / maxD * 100) : 0;
+      var wd = '日一二三四五六'[new Date(d.ts).getDay()];
+      return '<div class="b7"><div class="bt"><div class="bf' + (d.ms ? '' : ' zero') + '" style="height:' + h.toFixed(1) + '%"></div></div>' +
+        '<div class="bl' + (d.today ? ' today' : '') + '">' + wd + '</div></div>';
+    }).join('');
+  }
+
+  /* ================= 渲染：设置页 ================= */
+  function renderCatEditor() {
+    var box = $('#catEditor');
+    box.innerHTML = state.cats.map(function (c) {
+      return '<div class="ce-cat">' +
+        '<div class="ce-row">' +
+        '<input type="color" value="' + esc(c.color) + '" data-catcolor="' + esc(c.id) + '">' +
+        '<input class="ce-name" value="' + esc(c.name) + '" data-catname="' + esc(c.id) + '">' +
+        '<button class="ce-del" data-catdel="' + esc(c.id) + '">删除</button>' +
+        '</div>' +
+        '<div class="ce-subs">' +
+        c.subs.map(function (s) {
+          return '<span class="ce-sub">' + esc(s.name) +
+            '<button data-subdel="' + esc(c.id) + '|' + esc(s.id) + '">×</button></span>';
+        }).join('') +
+        '<button class="ce-add" data-subadd="' + esc(c.id) + '">+ 标签</button>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  function renderDataInfo() {
+    var now = Date.now();
+    var all = state.entries.length;
+    var live = liveEntries().length;
+    var bytes = 0;
+    try { bytes = (localStorage.getItem(DB_KEY) || '').length; } catch (e) {}
+    var kb = (bytes / 1024).toFixed(1);
+    $('#dataInfo').innerHTML =
+      '<div class="row-btn" style="border-top:0"><span class="rb-l"><span>记录总数</span><span class="rb-s">' + live + ' 条有效 · ' + (all - live) + ' 条在回收站</span></span></div>' +
+      '<div class="row-btn"><span class="rb-l"><span>占用空间</span><span class="rb-s">' + kb + ' KB' + (storageOK ? '' : ' · 本地存储不可用') + '</span></span></div>' +
+      '<div class="row-btn"><span class="rb-l"><span>当前计时</span><span class="rb-s">' +
+      (activeEntry() ? '正在记录' : '无') + '</span></span></div>' +
+      (location.protocol === 'file:'
+        ? '<div class="row-btn"><span class="rb-l"><span>打开方式</span><span class="rb-s">当前是本地文件模式，数据可能不被浏览器长期保留；建议用「启动.cmd」打开</span></span></div>'
+        : '');
+  }
+
+  function renderExportHint() {
+    var last = state.meta.lastExportAt || 0;
+    var el = $('#exportHint');
+    if (!last) { el.textContent = '还没有导出过备份，建议现在就导出一次。'; return; }
+    var days = Math.floor((Date.now() - last) / DAY);
+    if (days <= 0) el.textContent = '上次导出：今天。';
+    else if (days === 1) el.textContent = '上次导出：昨天。';
+    else el.textContent = '上次导出：' + days + ' 天前。';
+    if (days >= 7) el.textContent += ' 数据只存在本机，建议尽快备份。';
+  }
+
+  function renderAll() {
+    renderHeader();
+    renderTimerCard();
+    renderRecent();
+    renderList();
+    renderStats();
+    renderCatEditor();
+    renderDataInfo();
+    renderExportHint();
+  }
+
+  /* ================= 视图切换 ================= */
+  function switchView(name) {
+    ['record', 'stats', 'settings'].forEach(function (v) {
+      var el = $('#view-' + v);
+      if (el) el.hidden = (v !== name);
+    });
+    $$('.tab').forEach(function (t) {
+      t.classList.toggle('on', t.dataset.view === name);
+    });
+    if (name === 'stats') renderStats();
+    window.scrollTo(0, 0);
+  }
+
+  /* ================= 抽屉 ================= */
+  function openSheet(id) {
+    var m = $('#mask'), s = $(id);
+    m.hidden = false;
+    s.hidden = false;
+    requestAnimationFrame(function () {
+      m.classList.add('show');
+      s.classList.add('show');
+    });
+  }
+  function closeSheets() {
+    var m = $('#mask');
+    m.classList.remove('show');
+    $$('.sheet').forEach(function (s) {
+      if (!s.hidden) {
+        s.classList.remove('show');
+        setTimeout(function () { s.hidden = true; }, 260);
+      }
+    });
+    setTimeout(function () { m.hidden = true; }, 220);
+  }
+
+  function renderPicker() {
+    var body = $('#pickerBody');
+    var html = '';
+    var recents = [];
+    for (var i = 0; i < state.meta.recent.length && recents.length < 5; i++) {
+      var f = findSub(state.meta.recent[i]);
+      if (f) recents.push(f);
+    }
+    if (recents.length) {
+      html += '<div class="pk-group"><div class="pk-title">最近使用</div><div class="pk-chips">';
+      html += recents.map(function (f) {
+        return '<button class="chip" data-pick="' + esc(f.cat.id) + '|' + esc(f.sub.id) + '" style="--c:' + esc(f.cat.color) + '">' +
+          '<i></i>' + esc(f.sub.name) + '</button>';
+      }).join('');
+      html += '</div></div>';
+    }
+    state.cats.forEach(function (c) {
+      html += '<div class="pk-group"><div class="pk-title"><i style="background:' + esc(c.color) + '"></i>' + esc(c.name) + '</div><div class="pk-chips">';
+      html += c.subs.map(function (s) {
+        return '<button class="chip" data-pick="' + esc(c.id) + '|' + esc(s.id) + '">' + esc(s.name) + '</button>';
+      }).join('');
+      html += '<button class="chip chip-new" data-newsub="' + esc(c.id) + '">+ 新标签</button>';
+      html += '</div></div>';
+    });
+    body.innerHTML = html;
+  }
+
+  function openPicker(mode) {
+    pickerMode = mode || 'start';
+    renderPicker();
+    openSheet('#sheetPicker');
+  }
+
+  /* ================= 表单 ================= */
+  function fillCatSelect(selectedCatId, selectedSubId) {
+    var fc = $('#fCat'), fs = $('#fSub');
+    fc.innerHTML = state.cats.map(function (c) {
+      return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>';
+    }).join('');
+    var cid = selectedCatId || (state.cats[0] && state.cats[0].id);
+    fc.value = cid;
+    fillSubSelect(cid, selectedSubId);
+  }
+  function fillSubSelect(catId, selectedSubId) {
+    var fs = $('#fSub');
+    var c = findCat(catId);
+    var subs = c ? c.subs : [];
+    fs.innerHTML = subs.map(function (s) {
+      return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>';
+    }).join('') || '<option value="">（该分类暂无标签）</option>';
+    if (selectedSubId) fs.value = selectedSubId;
+  }
+
+  function openForm(mode, entryId) {
+    editingId = entryId || null;
+    var now = Date.now();
+    var e = entryId ? entryById(entryId) : null;
+
+    $('#formTitle').textContent = e ? '编辑记录' : '补记一段时间';
+    $('#btnFormDel').hidden = !e;
+
+    if (e) {
+      $('#fDate').value = dateInputVal(e.start);
+      $('#fStart').value = timeInputVal(e.start);
+      $('#fEnd').value = timeInputVal(e.end == null ? now : e.end);
+      fillCatSelect(e.catId, e.subId);
+      $('#fNote').value = e.note || '';
+    } else {
+      // 默认：最近一段的结束时间 → 现在；没有则现在往前 30 分钟
+      var last = liveEntries().filter(function (x) { return x.end != null; })
+        .sort(function (a, b) { return b.end - a.end; })[0];
+      var end = now, start = now - 30 * 60000;
+      if (last && now - last.end < 3 * 3600000) { start = last.end; end = start + 30 * 60000; if (end > now) end = now; }
+      $('#fDate').value = dateInputVal(start);
+      $('#fStart').value = timeInputVal(start);
+      $('#fEnd').value = timeInputVal(end);
+      var lastSub = state.meta.recent[0] ? findSub(state.meta.recent[0]) : null;
+      if (lastSub) fillCatSelect(lastSub.cat.id, lastSub.sub.id);
+      else fillCatSelect(null, null);
+      $('#fNote').value = '';
+    }
+    checkFormWarn();
+    openSheet('#sheetForm');
+  }
+
+  function readFormTimes() {
+    var d = $('#fDate').value;
+    var s = $('#fStart').value, en = $('#fEnd').value;
+    if (!d || !s || !en) return null;
+    var start = parseLocal(d, s);
+    var end = parseLocal(d, en);
+    if (end <= start) end += DAY; // 跨天
+    return { start: start, end: end };
+  }
+
+  function checkFormWarn() {
+    var t = readFormTimes();
+    var w = $('#fWarn');
+    if (!t) { w.hidden = true; return; }
+    var dur = t.end - t.start;
+    var ov = overlaps(t.start, t.end, editingId);
+    if (dur > 24 * 3600000) {
+      w.hidden = false;
+      w.textContent = '时长超过 24 小时，请检查时间是否正确。';
+    } else if (ov.length) {
+      w.hidden = false;
+      w.textContent = '与 ' + ov.length + ' 条已有记录重叠，仍可保存。';
+    } else {
+      w.hidden = true;
+    }
+  }
+
+  /* ================= 事件 ================= */
+  function bindEvents() {
+    // 主导航
+    $$('.tab').forEach(function (t) {
+      t.addEventListener('click', function () { switchView(t.dataset.view); });
+    });
+
+    // 开始 / 停止
+    $('#btnStart').addEventListener('click', function () {
+      if (activeEntry()) {
+        var e = closeTimer(Date.now());
+        renderAll();
+        toast(e && e.end ? '已记录 ' + fmtDur(e.end - e.start) : '已停止');
+      } else {
+        openPicker('start');
+      }
+    });
+
+    $('#btnSwitch').addEventListener('click', function () { openPicker('switch'); });
+
+    // 补记 / 导入 / 导出
+    $('#btnManual').addEventListener('click', function () { openForm('manual'); });
+    $('#btnExport').addEventListener('click', doExport);
+    $('#btnExport2').addEventListener('click', doExport);
+    $('#btnImport').addEventListener('click', function () { $('#fileInput').click(); });
+    $('#btnImport2').addEventListener('click', function () { $('#fileInput').click(); });
+    $('#fileInput').addEventListener('change', function (ev) {
+      var f = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (f) doImportFile(f);
+    });
+
+    // 快捷 chips
+    $('#recentChips').addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-quick]');
+      if (!b) return;
+      var p = b.dataset.quick.split('|');
+      var act = activeEntry();
+      if (act && act.subId === p[1]) { toast('正在记录这一项'); return; }
+      startTimer(p[0], p[1]);
+      renderAll();
+      toast(act ? '已切换并继续计时' : '开始计时');
+    });
+
+    // 记录点击 → 编辑
+    $('#entryList').addEventListener('click', function (ev) {
+      var el = ev.target.closest('[data-open]');
+      if (el) openForm('edit', el.dataset.open);
+    });
+
+    // 日期翻页
+    $$('[data-day]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var d = parseInt(b.dataset.day, 10);
+        if (listDay + d > 0) return;
+        listDay += d;
+        renderList();
+      });
+    });
+
+    // 抽屉关闭
+    $('#mask').addEventListener('click', closeSheets);
+    $$('[data-close]').forEach(function (b) { b.addEventListener('click', closeSheets); });
+
+    // 选择标签
+    $('#pickerBody').addEventListener('click', function (ev) {
+      var pick = ev.target.closest('[data-pick]');
+      if (pick) {
+        var p = pick.dataset.pick.split('|');
+        var act = activeEntry();
+        if (act && act.subId === p[1]) { closeSheets(); toast('正在记录这一项'); return; }
+        startTimer(p[0], p[1]);
+        closeSheets();
+        renderAll();
+        toast(act ? '已切换并继续计时' : '开始计时');
+        return;
+      }
+      var add = ev.target.closest('[data-newsub]');
+      if (add) {
+        var catId = add.dataset.newsub;
+        var inp = document.createElement('input');
+        inp.className = 'chip-input';
+        inp.placeholder = '标签名';
+        inp.setAttribute('data-icat', catId);
+        add.replaceWith(inp);
+        inp.focus();
+        inp.addEventListener('keydown', function (ev2) {
+          if (ev2.key === 'Enter') {
+            ev2.preventDefault();
+            commitNewSub(inp);
+          } else if (ev2.key === 'Escape') {
+            renderPicker();
+          }
+        });
+        inp.addEventListener('blur', function () {
+          if (inp.isConnected && inp.value.trim()) commitNewSub(inp);
+          else if (inp.isConnected) renderPicker();
+        });
+      }
+    });
+
+    // 表单
+    $('#entryForm').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var t = readFormTimes();
+      if (!t) { toast('请填写完整的日期和时间'); return; }
+      if (t.end - t.start < 60000) { toast('时长至少 1 分钟'); return; }
+      var catId = $('#fCat').value;
+      var subId = $('#fSub').value;
+      var note = $('#fNote').value.trim();
+      if (!catId) { toast('请选择分类'); return; }
+
+      if (editingId) {
+        updateEntry(editingId, { start: t.start, end: t.end, catId: catId, subId: subId, note: note });
+        // 编辑一条正在计时的记录 = 结束它
+        if (state.timer && state.timer.entryId === editingId) state.timer = null;
+        editingId = null;
+        clampListDay();
+        closeSheets();
+        renderAll();
+        toast('已更新');
+      } else {
+        addEntry(t.start, t.end, catId, subId, note);
+        listDay = 0;
+        closeSheets();
+        renderAll();
+        toast('已补记 ' + fmtDur(t.end - t.start));
+      }
+    });
+
+    $('#fCat').addEventListener('change', function () { fillSubSelect($('#fCat').value, null); });
+    ['#fDate', '#fStart', '#fEnd'].forEach(function (s) {
+      $(s).addEventListener('change', checkFormWarn);
+      $(s).addEventListener('input', checkFormWarn);
+    });
+
+    // 时长快捷
+    $('#durQuick').addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-dur]');
+      if (!b) return;
+      var mins = parseInt(b.dataset.dur, 10);
+      var d = $('#fDate').value, s = $('#fStart').value;
+      if (!d || !s) return;
+      var start = parseLocal(d, s);
+      var end = start + mins * 60000;
+      var d2 = new Date(end);
+      var sameDay = dateInputVal(end) === d;
+      $('#fEnd').value = timeInputVal(end);
+      if (!sameDay) { /* 跨天时保留 24h 制时间，保存时会自动 +1 天 */ }
+      checkFormWarn();
+    });
+
+    $('#btnFormDel').addEventListener('click', function () {
+      if (!editingId) return;
+      if (!confirm('删除这条记录？')) return;
+      deleteEntry(editingId);
+      editingId = null;
+      closeSheets();
+      renderAll();
+      toast('已删除');
+    });
+
+    // 统计范围
+    $('#rangeSeg').addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-range]');
+      if (!b) return;
+      range = b.dataset.range;
+      $$('#rangeSeg button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      renderStats();
+    });
+
+    // 分类编辑
+    $('#catEditor').addEventListener('change', function (ev) {
+      var t = ev.target;
+      if (t.dataset.catname !== undefined) {
+        var c = findCat(t.dataset.catname);
+        if (c) { c.name = t.value.trim() || '未命名'; save(); renderAll(); }
+      } else if (t.dataset.catcolor !== undefined) {
+        var c2 = findCat(t.dataset.catcolor);
+        if (c2) { c2.color = t.value; save(); renderAll(); }
+      }
+    });
+    $('#catEditor').addEventListener('click', function (ev) {
+      var del = ev.target.closest('[data-catdel]');
+      if (del) { removeCat(del.dataset.catdel); return; }
+      var add = ev.target.closest('[data-subadd]');
+      if (add) { addSub(add.dataset.subadd); return; }
+      var sd = ev.target.closest('[data-subdel]');
+      if (sd) {
+        var p = sd.dataset.subdel.split('|');
+        removeSub(p[0], p[1]);
+      }
+    });
+    $('#btnAddCat').addEventListener('click', addCat);
+
+    // 数据维护
+    $('#btnPurge').addEventListener('click', function () {
+      var cut = Date.now() - 30 * DAY;
+      var before = state.entries.length;
+      state.entries = state.entries.filter(function (e) {
+        return !(e.deletedAt && e.deletedAt < cut);
+      });
+      var n = before - state.entries.length;
+      save(); renderAll();
+      toast(n ? '已清理 ' + n + ' 条' : '没有可清理的记录');
+    });
+
+    $('#btnReset').addEventListener('click', function () {
+      if (!confirm('确定清空所有数据？此操作不可恢复，建议先导出备份。')) return;
+      if (!confirm('再确认一次：所有记录和分类都会丢失。')) return;
+      var t = state.timer;
+      state = blankState();
+      save(); renderAll();
+      toast('已清空');
+    });
+
+    // 键盘快捷键（桌面）
+    document.addEventListener('keydown', function (ev) {
+      if (ev.target.matches('input,select,textarea')) return;
+      if (ev.key === ' ' && !ev.metaKey && !ev.ctrlKey && ev.target === document.body) {
+        ev.preventDefault();
+        $('#btnStart').click();
+      }
+      if (ev.key === 'Escape') closeSheets();
+    });
+
+    // 回到前台时刷新
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) { renderAll(); tick(); }
+    });
+  }
+
+  function clampListDay() {
+    if (listDay < 0) listDay = 0;
+  }
+
+  function commitNewSub(inp) {
+    var catId = inp.getAttribute('data-icat');
+    var name = inp.value.trim();
+    var c = findCat(catId);
+    if (!c || !name) { renderPicker(); return; }
+    var exists = c.subs.filter(function (s) { return normName(s.name) === normName(name); })[0];
+    var sub = exists || { id: uid(), name: name };
+    if (!exists) c.subs.push(sub);
+    save();
+    startTimer(c.id, sub.id);
+    closeSheets();
+    renderAll();
+    toast('已新建标签并开始计时');
+  }
+
+  function addSub(catId) {
+    var c = findCat(catId);
+    if (!c) return;
+    var name = prompt('新标签名称');
+    if (!name || !name.trim()) return;
+    var n = name.trim();
+    if (c.subs.some(function (s) { return normName(s.name) === normName(n); })) { toast('已有同名标签'); return; }
+    c.subs.push({ id: uid(), name: n });
+    save(); renderAll();
+  }
+
+  function removeSub(catId, subId) {
+    var c = findCat(catId);
+    if (!c) return;
+    var used = liveEntries().filter(function (e) { return e.subId === subId; }).length;
+    if (used && !confirm('该标签下已有 ' + used + ' 条记录，删除后这些记录会显示为「未标注」。继续？')) return;
+    c.subs = c.subs.filter(function (s) { return s.id !== subId; });
+    state.meta.recent = state.meta.recent.filter(function (x) { return x !== subId; });
+    save(); renderAll();
+  }
+
+  function removeCat(catId) {
+    var c = findCat(catId);
+    if (!c) return;
+    var used = liveEntries().filter(function (e) { return e.catId === catId; }).length;
+    if (state.cats.length <= 1) { toast('至少保留一个分类'); return; }
+    if (used && !confirm('该分类下有 ' + used + ' 条记录，删除后这些记录会移到「未分类」。继续？')) return;
+
+    var fallback = state.cats.filter(function (x) {
+      return x.id !== catId && normName(x.name) === '未分类';
+    })[0];
+    if (!fallback && used) {
+      fallback = { id: uid(), name: '未分类', color: '#94a3b8', subs: [{ id: uid(), name: '其他' }] };
+      state.cats.push(fallback);
+    }
+    if (fallback) {
+      state.entries.forEach(function (e) {
+        if (e.catId === catId) {
+          e.catId = fallback.id;
+          if (!fallback.subs.some(function (s) { return s.id === e.subId; })) {
+            e.subId = fallback.subs[0] ? fallback.subs[0].id : '';
+          }
+          e.updatedAt = Date.now();
+        }
+      });
+    }
+    state.cats = state.cats.filter(function (x) { return x.id !== catId; });
+    c.subs.forEach(function (s) {
+      state.meta.recent = state.meta.recent.filter(function (x) { return x !== s.id; });
+    });
+    save(); renderAll();
+  }
+
+  function addCat() {
+    var name = prompt('一级分类名称，例如「阅读」');
+    if (!name || !name.trim()) return;
+    var n = name.trim();
+    if (state.cats.some(function (c) { return normName(c.name) === normName(n); })) { toast('已有同名分类'); return; }
+    var palette = ['#4f6df5', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#64748b'];
+    state.cats.push({
+      id: uid(), name: n,
+      color: palette[state.cats.length % palette.length],
+      subs: [{ id: uid(), name: '默认' }]
+    });
+    save(); renderAll();
+    toast('已新增分类');
+  }
+
+  /* ================= 计时刷新 ================= */
+  function tick() {
+    var e = activeEntry();
+    if (!e) return;
+    var now = Date.now();
+    var elapsed = now - e.start;
+    var t = $('#tTime');
+    if (t) t.textContent = fmtHMS(elapsed);
+    var lv = document.querySelector('[data-live="1"] .entry-dur');
+    if (lv) lv.textContent = fmtHMS(elapsed);
+
+    // 运行中条目会长大，今日合计要跟着走
+    if (listDay === 0) {
+      var entries = liveEntries();
+      var d0 = startOfDay(now);
+      $('#hdrTotal').textContent = fmtDur(sumRange(entries, d0, now, now));
+      var sum = $('#listSum');
+      if (sum) sum.textContent = '共 ' + fmtDur(sumRange(entries, d0, d0 + DAY, now));
+    }
+
+    var k = dayKey(now);
+    if (k !== lastDayKey) {
+      lastDayKey = k;
+      renderAll();
+    }
+  }
+
+  /* ================= 自测 ================= */
+  function runSelfTest() {
+    var out = [];
+    function ok(name, cond) { out.push((cond ? 'PASS' : 'FAIL') + ' ' + name); }
+
+    // 1. 裁剪
+    var now = new Date(2026, 4, 10, 12, 0, 0).getTime();
+    var e1 = { id: 'a', start: now - 3600000, end: now + 3600000 };
+    ok('clip 全部在内', clipMs(e1, now - 7200000, now + 7200000, now) === 7200000);
+    ok('clip 左裁剪', clipMs(e1, now - 1800000, now + 7200000, now) === 5400000);
+    ok('clip 完全在外', clipMs({ id: 'b', start: now + 7200000, end: now + 9000000 }, now - 7200000, now, now) === 0);
+
+    // 2. 运行中条目用 now 计算
+    var live = { id: 'c', start: now - 600000, end: null };
+    ok('运行中按 now 计', clipMs(live, now - 7200000, now, now) === 600000);
+
+    // 3. 分组求和 + 排序
+    var ents = [
+      { id: '1', start: now - 3600000, end: now - 1800000, catId: 'w', subId: 's1' }, // 30 分钟
+      { id: '2', start: now - 1800000, end: now, catId: 'w', subId: 's2' },           // 30 分钟
+      { id: '3', start: now - 900000, end: now, catId: 'r', subId: 's3' }             // 15 分钟
+    ];
+    var g = groupRange(ents, now - 7200000, now, now, function (e) { return e.catId; });
+    ok('分组总额', g.total === 4500000);
+    ok('分组排序降序', g.items[0].key === 'w' && g.items[0].ms === 3600000);
+
+    // 4. 跨天裁剪按天切分
+    var night = { id: 'n', start: startOfDay(now) - 3600000, end: startOfDay(now) + 1800000, catId: 'w', subId: 's' };
+    ok('跨天今天部分', clipMs(night, startOfDay(now), startOfDay(now) + DAY, now) === 1800000);
+    ok('跨天昨天部分', clipMs(night, startOfDay(now) - DAY, startOfDay(now), now) === 3600000);
+
+    // 5. 合并：新增 + 分类按名归并
+    var target = {
+      cats: [{ id: 'lc', name: '工作', color: '#000', subs: [{ id: 'ls', name: '写代码' }] }],
+      entries: [], timer: null
+    };
+    var payload = {
+      cats: [{ id: 'rc', name: '工作', color: '#111', subs: [{ id: 'rs', name: '写代码' }, { id: 'rs2', name: '开会' }] }],
+      entries: [
+        { id: 'e1', start: now - 1000, end: now, catId: 'rc', subId: 'rs', updatedAt: 10 },
+        { id: 'e2', start: now - 1000, end: now, catId: 'rc', subId: 'rs2', updatedAt: 10 }
+      ]
+    };
+    var rep = mergePayload(target, payload);
+    ok('合并新增 2 条', rep.added === 2 && target.entries.length === 2);
+    ok('分类按名归并未重复', target.cats.length === 1);
+    ok('条目 catId 重映射', target.entries[0].catId === 'lc');
+    ok('二级标签按名归并', target.entries[0].subId === 'ls');
+    ok('新标签被加入', target.cats[0].subs.length === 2);
+
+    // 6. 合并：LWW
+    var rep2 = mergePayload(target, {
+      cats: [],
+      entries: [{ id: 'e1', start: now - 1000, end: now, catId: 'lc', subId: 'ls', note: 'new', updatedAt: 20 }]
+    });
+    ok('LWW 更新时间较新者胜', target.entries[0].note === 'new' && rep2.updated === 1);
+    var rep3 = mergePayload(target, {
+      cats: [],
+      entries: [{ id: 'e1', start: now - 1000, end: now, catId: 'lc', subId: 'ls', note: 'old', updatedAt: 5 }]
+    });
+    ok('LWW 旧版本不覆盖', target.entries[0].note === 'new' && rep3.skipped === 1);
+
+    // 7. 导入未结束条目被收缩
+    var t2 = { cats: [], entries: [], timer: null };
+    var r4 = mergePayload(t2, { cats: [], entries: [{ id: 'z', start: now, end: null, catId: 'x', subId: 'y', updatedAt: 1 }] });
+    ok('未结束条目收缩为 0 时长', t2.entries[0].end === t2.entries[0].start && r4.closed === 1);
+
+    // 8. 导入时跳过本地正在计时的条目
+    var t3 = {
+      cats: [], entries: [{ id: 'act', start: now, end: null, catId: 'x', subId: 'y', updatedAt: 1 }],
+      timer: { entryId: 'act' }
+    };
+    mergePayload(t3, { cats: [], entries: [{ id: 'act', start: now, end: now + 5000, catId: 'x', subId: 'y', updatedAt: 99 }] });
+    ok('不覆盖本地运行中的计时', t3.entries[0].end === null);
+
+    // 9. 时长格式化
+    ok('fmtDur 小时', fmtDur(3600000) === '1h 00m');
+    ok('fmtDur 分钟', fmtDur(900000) === '15m');
+
+    // 10. 跨天补记解析（end 小于 start 时 +1 天）
+    var p1 = parseLocal('2026-05-10', '23:30');
+    var p2 = parseLocal('2026-05-10', '00:30');
+    ok('时间解析', p2 - p1 < 0);
+
+    var html = '<pre id="selftest">' + out.join('\n') + '</pre>';
+    document.body.innerHTML = html;
+    var fail = out.filter(function (x) { return x.indexOf('FAIL') === 0; }).length;
+    document.title = fail ? 'SELFTEST FAIL ' + fail : 'SELFTEST PASS ' + out.length;
+    return out;
+  }
+
+  if (new URLSearchParams(location.search).has('selftest')) {
+    try { runSelfTest(); } catch (err) {
+      document.body.innerHTML = '<pre id="selftest">ERROR ' + String(err && err.stack || err) + '</pre>';
+    }
+    return;
+  }
+
+  /* ================= 启动 ================= */
+  function boot() {
+    state = DEMO ? demoState() : load();
+    lastDayKey = dayKey(Date.now());
+    bindEvents();
+    switchView(INIT_VIEW);
+    renderAll();
+    setInterval(tick, 1000);
+    if (activeEntry()) tick();
+
+    if (!storageOK) toast('本地存储不可用，数据刷新后会丢失');
+
+    // PWA
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+
+})();
+</script>
+</body>
+</html>
