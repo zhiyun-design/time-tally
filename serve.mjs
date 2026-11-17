@@ -1,8 +1,12 @@
 /**
- * 本地静态服务，方便手机在同一个 WiFi 下打开。
+ * 时间账本 · 本地服务
  *   node serve.mjs
- * 电脑访问 http://localhost:5180
- * 手机访问脚本打印出来的 http://<你的局域网IP>:5180
+ *
+ * 除了托管静态文件，还提供自动同步接口：
+ *   GET  /api/sync           → { rev, updatedAt, payload }
+ *   POST /api/sync           → 请求体 { since, payload }；since 与当前 rev 不一致返回 409
+ *
+ * 同步数据存在 data/sync-state.json，不会随代码提交。
  */
 import http from 'node:http';
 import fs from 'node:fs';
@@ -12,7 +16,11 @@ import { fileURLToPath } from 'node:url';
 import { exec } from 'node:child_process';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const PORT = Number(process.env.PORT || 5180);
+const DATA_DIR = process.env.TT_DATA_DIR
+  ? path.resolve(process.env.TT_DATA_DIR)
+  : path.join(ROOT, 'data');
+const DATA_FILE = path.join(DATA_DIR, 'sync-state.json');
+const MAX_BODY = 16 * 1024 * 1024;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -28,13 +36,132 @@ const MIME = {
   '.md': 'text/markdown; charset=utf-8',
 };
 
-const server = http.createServer((req, res) => {
-  let pathname = decodeURIComponent((req.url || '/').split('?')[0]);
-  if (pathname.endsWith('/')) pathname += 'index.html';
+/* ---------------- 同步存储 ---------------- */
+
+let store = null;
+
+function emptyPayload() {
+  return { v: 1, cats: [], entries: [] };
+}
+
+function loadStore() {
+  if (store) return store;
+  store = { rev: 0, updatedAt: 0, payload: emptyPayload() };
+  try {
+    const raw = fs.readFileSync(DATA_FILE, 'utf8');
+    const j = JSON.parse(raw);
+    if (j && typeof j.rev === 'number' && j.payload && Array.isArray(j.payload.entries)) {
+      store = { rev: j.rev, updatedAt: j.updatedAt || 0, payload: j.payload };
+    }
+  } catch (e) {
+    /* 首次运行或文件损坏，用空状态 */
+  }
+  return store;
+}
+
+function persist() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const tmp = DATA_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(store), 'utf8');
+  fs.renameSync(tmp, DATA_FILE); // 原子替换，避免写一半断电留下坏文件
+}
+
+function fingerprint(payload) {
+  return JSON.stringify(payload || emptyPayload());
+}
+
+/* ---------------- HTTP 辅助 ---------------- */
+
+function sendJson(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(body);
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > MAX_BODY) {
+        reject(Object.assign(new Error('请求体过大'), { code: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
+/* ---------------- 同步接口 ---------------- */
+
+function handleSyncGet(res) {
+  const s = loadStore();
+  sendJson(res, 200, { rev: s.rev, updatedAt: s.updatedAt, payload: s.payload });
+}
+
+async function handleSyncPost(req, res) {
+  let data;
+  try {
+    const body = await readBody(req);
+    data = JSON.parse(body || '{}');
+  } catch (e) {
+    sendJson(res, e && e.code === 413 ? 413 : 400, { error: '请求体无法解析' });
+    return;
+  }
+
+  if (!data || !data.payload || !Array.isArray(data.payload.entries)) {
+    sendJson(res, 400, { error: 'payload 格式不正确' });
+    return;
+  }
+
+  const s = loadStore();
+  const since = typeof data.since === 'number' ? data.since : s.rev;
+
+  // 乐观并发：客户端基于旧版本提交时，把最新状态退回去让它重新合并
+  if (since !== s.rev) {
+    sendJson(res, 409, { rev: s.rev, updatedAt: s.updatedAt, payload: s.payload });
+    return;
+  }
+
+  const incoming = {
+    v: 1,
+    cats: Array.isArray(data.payload.cats) ? data.payload.cats : [],
+    entries: data.payload.entries,
+  };
+
+  if (fingerprint(incoming) !== fingerprint(s.payload)) {
+    s.payload = incoming;
+    s.rev += 1;
+    s.updatedAt = Date.now();
+    persist();
+  }
+
+  sendJson(res, 200, { rev: s.rev, updatedAt: s.updatedAt });
+}
+
+/* ---------------- 静态文件 ---------------- */
+
+function serveStatic(req, res, pathname) {
+  if (pathname === '/') pathname = '/index.html';
+
+  // 同步数据目录不对外暴露
+  if (pathname.startsWith('/data/') || pathname === '/data') {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Forbidden');
+    return;
+  }
 
   const target = path.normalize(path.join(ROOT, pathname));
   if (!target.startsWith(ROOT)) {
-    res.writeHead(403).end('Forbidden');
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Forbidden');
     return;
   }
 
@@ -49,9 +176,49 @@ const server = http.createServer((req, res) => {
     });
     res.end(data);
   });
-});
+}
 
-function lanAddresses() {
+/* ---------------- 服务器 ---------------- */
+
+export function createServer() {
+  return http.createServer((req, res) => {
+    const rawPath = decodeURIComponent((req.url || '/').split('?')[0]);
+    const method = req.method || 'GET';
+
+    if (rawPath.startsWith('/api/')) {
+      if (method === 'OPTIONS') {
+        res.writeHead(204, {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Max-Age': '86400',
+        });
+        res.end();
+        return;
+      }
+      if (rawPath === '/api/sync') {
+        if (method === 'GET') { handleSyncGet(res); return; }
+        if (method === 'POST') { handleSyncPost(req, res); return; }
+        sendJson(res, 405, { error: '方法不支持' });
+        return;
+      }
+      if (rawPath === '/api/health') {
+        sendJson(res, 200, { ok: true, app: 'time-tally', rev: loadStore().rev });
+        return;
+      }
+      sendJson(res, 404, { error: '接口不存在' });
+      return;
+    }
+
+    if (method !== 'GET' && method !== 'HEAD') {
+      res.writeHead(405).end('Method Not Allowed');
+      return;
+    }
+    serveStatic(req, res, rawPath);
+  });
+}
+
+export function lanAddresses() {
   const out = [];
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets)) {
@@ -62,21 +229,34 @@ function lanAddresses() {
   return out;
 }
 
-server.listen(PORT, '0.0.0.0', () => {
-  const local = `http://localhost:${PORT}`;
-  console.log('');
-  console.log('  时间账本已启动');
-  console.log('  电脑：' + local);
-  for (const ip of lanAddresses()) {
-    console.log('  手机：http://' + ip + ':' + PORT + '   （需与电脑同一个 WiFi）');
+const isMain = (() => {
+  try {
+    return path.resolve(process.argv[1] || '') === path.resolve(fileURLToPath(import.meta.url));
+  } catch (e) {
+    return false;
   }
-  console.log('');
-  console.log('  按 Ctrl+C 停止');
-  console.log('');
+})();
 
-  if (process.platform === 'win32' && !process.env.NO_OPEN) {
-    exec(`start "" "${local}"`, () => {});
-  } else if (process.platform === 'darwin' && !process.env.NO_OPEN) {
-    exec(`open "${local}"`, () => {});
-  }
-});
+if (isMain) {
+  const PORT = Number(process.env.PORT || 5180);
+  const server = createServer();
+  server.listen(PORT, '0.0.0.0', () => {
+    const local = `http://localhost:${PORT}`;
+    console.log('');
+    console.log('  时间账本已启动');
+    console.log('  电脑：' + local);
+    for (const ip of lanAddresses()) {
+      console.log('  手机：http://' + ip + ':' + PORT + '   （需与电脑同一个 WiFi）');
+    }
+    console.log('');
+    console.log('  自动同步已就绪，手机与电脑打开同一个地址即会互相同步');
+    console.log('  按 Ctrl+C 停止');
+    console.log('');
+
+    if (process.platform === 'win32' && !process.env.NO_OPEN) {
+      exec(`start "" "${local}"`, () => {});
+    } else if (process.platform === 'darwin' && !process.env.NO_OPEN) {
+      exec(`open "${local}"`, () => {});
+    }
+  });
+}

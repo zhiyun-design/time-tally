@@ -1,0 +1,7 @@
+# 自动同步的服务器数据，不应提交
+data/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini

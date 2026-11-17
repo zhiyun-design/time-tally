@@ -187,6 +187,15 @@
   .hint{ font-size:12.5px; color:var(--muted); line-height:1.65; margin:10px 0 0; }
   .hint b{ color:var(--text); font-weight:600; }
 
+  .sync-dot{ display:inline-block; width:6px; height:6px; border-radius:50%; background:#c3c8d2; margin-right:6px; vertical-align:middle; }
+  .sync-dot.busy{ background:var(--accent); animation:pulse 1.1s ease-in-out infinite; }
+  .sync-dot.ok{ background:#10b981; }
+  .sync-dot.err{ background:var(--danger); }
+  .sync-line{ display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--muted); margin-top:12px; }
+  .sync-line .t{ flex:1; }
+  .sync-line a{ color:var(--accent); font-size:12.5px; padding:4px 8px; border-radius:7px; background:rgba(79,70,229,.08); }
+  .sync-err{ color:var(--danger); }
+
   .ce-cat{ padding:12px 0; border-top:1px solid var(--line); }
   .ce-cat:first-child{ border-top:0; padding-top:0; }
   .ce-row{ display:flex; align-items:center; gap:9px; }
@@ -390,8 +399,19 @@
       <button class="ce-add" id="btnAddCat" style="margin-top:6px">+ 新增一级分类</button>
     </div>
 
+    <div class="card" id="syncCard">
+      <div class="card-title">自动同步</div>
+      <div class="seg" id="syncModeSeg">
+        <button data-syncmode="off">关闭</button>
+        <button data-syncmode="lan">局域网</button>
+        <button data-syncmode="gist">Gist</button>
+      </div>
+      <div id="syncPanel"></div>
+      <div id="syncStatus"></div>
+    </div>
+
     <div class="card">
-      <div class="card-title">多端同步</div>
+      <div class="card-title">手动同步</div>
       <button class="row-btn" id="btnExport2">
         <span class="rb-l"><span>导出数据</span><span class="rb-s">生成 .json 文件，可发送到另一台设备</span></span>
         <span class="arrow">›</span>
@@ -495,6 +515,7 @@
 
   /* ================= 常量 ================= */
   var DB_KEY = 'time-tally.v1';
+  var SYNC_KEY = 'time-tally.sync.v1';
   var SCHEMA = 1;
   var DAY = 86400000;
   var DEMO = new URLSearchParams(location.search).has('demo');
@@ -582,6 +603,12 @@
   var editingId = null;
   var lastDayKey = dayKey(Date.now());
 
+  // 同步配置单独存，不写进数据文件，避免导出时把 Token 带出去
+  var syncCfg = { mode: 'off', lanUrl: '', gistToken: '', gistId: '', auto: true, rev: 0, lastAt: 0 };
+  var syncState = { status: 'off', error: '', busy: false };
+  var syncTimer = null;
+  var suppressSync = false;
+
   function blankState() {
     return {
       v: SCHEMA,
@@ -635,6 +662,7 @@
     if (DEMO) return; // 预览模式只读，不落盘
     try { localStorage.setItem(DB_KEY, JSON.stringify(state)); }
     catch (e) { storageOK = false; toast('无法写入本地存储，数据可能不会保存'); }
+    if (!suppressSync) queueSync();
   }
 
   function demoState() {
@@ -997,6 +1025,257 @@
     reader.readAsText(file);
   }
 
+  /* ================= 自动同步 ================= */
+  var GIST_FILE = 'time-tally.json';
+  var GH_API = 'https://api.github.com';
+
+  function loadSyncCfg() {
+    var raw = null;
+    try { raw = localStorage.getItem(SYNC_KEY); } catch (e) {}
+    if (!raw) return;
+    var o = null;
+    try { o = JSON.parse(raw); } catch (e) {}
+    if (!o || typeof o !== 'object') return;
+    if (o.mode === 'lan' || o.mode === 'gist') syncCfg.mode = o.mode;
+    if (typeof o.lanUrl === 'string') syncCfg.lanUrl = o.lanUrl;
+    if (typeof o.gistToken === 'string') syncCfg.gistToken = o.gistToken;
+    if (typeof o.gistId === 'string') syncCfg.gistId = o.gistId;
+    if (typeof o.auto === 'boolean') syncCfg.auto = o.auto;
+    if (typeof o.rev === 'number') syncCfg.rev = o.rev;
+    if (typeof o.lastAt === 'number') syncCfg.lastAt = o.lastAt;
+  }
+
+  function saveSyncCfg() {
+    try { localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg)); } catch (e) {}
+  }
+
+  // 网络传输用的数据：运行中的条目按当前时刻封口，且不含 exportedAt 这类每次都变的字段
+  function syncPayload() {
+    var now = Date.now();
+    var entries = state.entries.map(function (e) {
+      var c = Object.assign({}, e);
+      if (c.end == null) c.end = now;
+      return c;
+    });
+    return { v: SCHEMA, cats: clone(state.cats), entries: entries };
+  }
+
+  // 把远端数据吸收进本地；期间不触发回推，否则会和同步本身形成循环
+  function applyRemote(payload) {
+    if (!payload || !Array.isArray(payload.entries)) return 0;
+    var changed = 0;
+    suppressSync = true;
+    try {
+      var rep = mergePayload(state, payload);
+      changed = rep.added + rep.updated + rep.newCats + rep.newSubs;
+      if (changed) { save(); renderAll(); }
+    } finally {
+      suppressSync = false;
+    }
+    return changed;
+  }
+
+  function lanBase() {
+    var u = String(syncCfg.lanUrl || '').trim().replace(/\/+$/, '');
+    if (!u) return '';
+    if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
+    return u;
+  }
+
+  async function syncLan() {
+    var base = lanBase();
+    if (location.protocol === 'file:' && !base) {
+      throw new Error('本地文件模式没有同步服务，请用启动.cmd 打开');
+    }
+    for (var attempt = 0; attempt < 3; attempt++) {
+      // 带时间戳 + no-store：避免任何一层缓存把旧数据当成最新状态
+      var gr = await fetch(base + '/api/sync?t=' + Date.now(), { cache: 'no-store' });
+      if (!gr.ok) throw new Error('读取失败 ' + gr.status);
+      var remote = await gr.json();
+
+      applyRemote(remote.payload);
+
+      var pr = await fetch(base + '/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ since: remote.rev, payload: syncPayload() })
+      });
+
+      if (pr.status === 409) continue; // 别人刚提交过，重新取一遍再合并
+      if (!pr.ok) throw new Error('上传失败 ' + pr.status);
+
+      var out = await pr.json();
+      syncCfg.rev = out.rev;
+      return;
+    }
+    throw new Error('同步冲突重试多次仍未成功');
+  }
+
+  async function ghFetch(pathname, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({
+      'Authorization': 'token ' + syncCfg.gistToken,
+      'Accept': 'application/vnd.github+json'
+    }, opts.headers || {});
+    var r = await fetch(GH_API + pathname, opts);
+    if (!r.ok) {
+      var msg = 'GitHub 返回 ' + r.status;
+      if (r.status === 401) msg = 'Token 无效或已过期';
+      else if (r.status === 403) msg = '被拒绝，可能是限流或 Token 缺少 gist 权限';
+      else if (r.status === 404) msg = '找不到这个 Gist，检查 ID 或 Token 权限';
+      throw new Error(msg);
+    }
+    return r.json();
+  }
+
+  async function syncGist() {
+    if (!syncCfg.gistToken) throw new Error('请先填写 GitHub Token');
+
+    if (syncCfg.gistId) {
+      var g = await ghFetch('/gists/' + encodeURIComponent(syncCfg.gistId));
+      var file = g.files && g.files[GIST_FILE];
+      var content = file && file.content;
+      if (file && file.truncated && file.raw_url) {
+        var raw = await fetch(file.raw_url);
+        if (raw.ok) content = await raw.text();
+      }
+      if (content) {
+        var remote = null;
+        try { remote = JSON.parse(content); } catch (e) {}
+        if (remote) applyRemote(remote);
+      }
+    }
+
+    var files = {};
+    files[GIST_FILE] = { content: JSON.stringify(syncPayload()) };
+
+    if (!syncCfg.gistId) {
+      var created = await ghFetch('/gists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: '时间账本同步数据', public: false, files: files })
+      });
+      syncCfg.gistId = created.id;
+      saveSyncCfg();
+    } else {
+      await ghFetch('/gists/' + encodeURIComponent(syncCfg.gistId), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files: files })
+      });
+    }
+  }
+
+  async function syncNow(quiet) {
+    if (DEMO) return;
+    if (syncCfg.mode === 'off') {
+      if (!quiet) toast('先在设置里开启自动同步');
+      return;
+    }
+    if (syncState.busy) return;
+    syncState.busy = true;
+    syncState.status = 'syncing';
+    renderSyncStatus();
+    updateSyncDot();
+    try {
+      if (syncCfg.mode === 'lan') await syncLan();
+      else await syncGist();
+      syncCfg.lastAt = Date.now();
+      syncState.status = 'ok';
+      syncState.error = '';
+      saveSyncCfg();
+      if (!quiet) toast('已同步');
+    } catch (err) {
+      syncState.status = 'error';
+      syncState.error = (err && err.message) || String(err);
+      if (!quiet) toast('同步失败：' + syncState.error, 4200);
+    } finally {
+      syncState.busy = false;
+      renderSyncStatus();
+      updateSyncDot();
+      renderDataInfo();
+    }
+  }
+
+  function queueSync() {
+    if (DEMO || syncCfg.mode === 'off' || !syncCfg.auto) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () { syncNow(true); }, 4000);
+  }
+
+  function ago(ts) {
+    var d = Date.now() - ts;
+    if (d < 45000) return '刚刚';
+    if (d < 3600000) return Math.floor(d / 60000) + ' 分钟前';
+    if (d < 86400000) return Math.floor(d / 3600000) + ' 小时前';
+    return Math.floor(d / 86400000) + ' 天前';
+  }
+
+  function syncDotClass() {
+    if (syncCfg.mode === 'off') return '';
+    if (syncState.status === 'syncing') return 'busy';
+    if (syncState.status === 'error') return 'err';
+    return syncCfg.lastAt ? 'ok' : '';
+  }
+
+  function renderSyncStatus() {
+    var el = $('#syncStatus');
+    if (!el) return;
+    if (syncCfg.mode === 'off') { el.innerHTML = ''; return; }
+    var txt;
+    if (syncState.status === 'syncing') txt = '正在同步…';
+    else if (syncState.status === 'error') txt = '<span class="sync-err">同步失败：' + esc(syncState.error) + '</span>';
+    else if (syncCfg.lastAt) txt = ago(syncCfg.lastAt) + '同步过';
+    else txt = '尚未同步';
+    el.innerHTML = '<div class="sync-line"><span class="sync-dot ' + syncDotClass() + '"></span><span class="t">' + txt + '</span></div>';
+  }
+
+  function updateSyncDot() {
+    var d = $('#syncDot');
+    if (d) d.className = 'sync-dot ' + syncDotClass();
+  }
+
+  function renderSync() {
+    var seg = $('#syncModeSeg');
+    if (!seg) return;
+    $$('#syncModeSeg button').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.syncmode === syncCfg.mode);
+    });
+    var panel = $('#syncPanel');
+    var html = '';
+
+    if (syncCfg.mode === 'off') {
+      panel.innerHTML = '<p class="hint">开启后，多台设备会自动交换数据，不用再手动导出导入。</p>';
+    } else if (syncCfg.mode === 'lan') {
+      html = '<p class="hint">在电脑上运行 <b>启动.cmd</b>，手机连同一个 WiFi 打开同一个地址，两端会自动互相同步。地址留空表示用当前页面的地址。</p>';
+      html += '<div class="fld" style="margin-top:12px"><label>同步服务地址</label>' +
+        '<input id="syncLanUrl" placeholder="留空＝当前地址" value="' + esc(syncCfg.lanUrl) + '"></div>';
+      html += '<div class="actions"><button class="btn main" id="btnSyncNow">立即同步</button></div>';
+      panel.innerHTML = html;
+    } else {
+      html = '<p class="hint">数据存到 GitHub 的一个私有 Gist，换网络也能同步。需要一个带 <b>gist</b> 权限的 Personal Access Token。</p>';
+      html += '<div class="fld" style="margin-top:12px"><label>Token</label>' +
+        '<input id="syncGistToken" type="password" placeholder="ghp_..." value="' + esc(syncCfg.gistToken) + '"></div>';
+      html += '<div class="fld"><label>Gist ID（留空会自动新建）</label>' +
+        '<input id="syncGistId" placeholder="留空自动创建" value="' + esc(syncCfg.gistId) + '"></div>';
+      html += '<div class="actions"><button class="btn main" id="btnSyncNow">立即同步</button></div>';
+      panel.innerHTML = html;
+    }
+    renderSyncStatus();
+  }
+
+  function setSyncMode(m) {
+    syncCfg.mode = m;
+    syncCfg.lastAt = 0;
+    syncState.status = m === 'off' ? 'off' : 'idle';
+    syncState.error = '';
+    saveSyncCfg();
+    renderSync();
+    updateSyncDot();
+    renderHeader();
+    if (m !== 'off') syncNow(true);
+  }
+
   /* ================= 渲染：记录页 ================= */
   var toastTimer = null;
   function toast(msg, ms) {
@@ -1017,9 +1296,10 @@
       var en = entryEnd(e, now);
       return e.start < now && en > startOfDay(now);
     }).length;
-    $('#hdrRight').innerHTML = DEMO
+    var dot = syncCfg.mode === 'off' ? '' : '<span class="sync-dot ' + syncDotClass() + '" id="syncDot"></span>';
+    $('#hdrRight').innerHTML = dot + (DEMO
       ? '预览模式<br>数据不保存'
-      : (cnt ? cnt + ' 条记录' : '今天还没有记录');
+      : (cnt ? cnt + ' 条记录' : '今天还没有记录'));
   }
 
   function renderTimerCard() {
@@ -1282,6 +1562,7 @@
     renderCatEditor();
     renderDataInfo();
     renderExportHint();
+    renderSyncStatus();
   }
 
   /* ================= 视图切换 ================= */
@@ -1626,6 +1907,19 @@
     });
     $('#btnAddCat').addEventListener('click', addCat);
 
+    // 自动同步
+    $('#syncCard').addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-syncmode]');
+      if (b) { setSyncMode(b.dataset.syncmode); return; }
+      if (ev.target.closest('#btnSyncNow')) syncNow(false);
+    });
+    $('#syncCard').addEventListener('input', function (ev) {
+      var t = ev.target;
+      if (t.id === 'syncLanUrl') { syncCfg.lanUrl = t.value.trim(); saveSyncCfg(); }
+      else if (t.id === 'syncGistToken') { syncCfg.gistToken = t.value.trim(); saveSyncCfg(); }
+      else if (t.id === 'syncGistId') { syncCfg.gistId = t.value.trim(); saveSyncCfg(); }
+    });
+
     // 数据维护
     $('#btnPurge').addEventListener('click', function () {
       var cut = Date.now() - 30 * DAY;
@@ -1639,11 +1933,15 @@
     });
 
     $('#btnReset').addEventListener('click', function () {
-      if (!confirm('确定清空所有数据？此操作不可恢复，建议先导出备份。')) return;
-      if (!confirm('再确认一次：所有记录和分类都会丢失。')) return;
-      var t = state.timer;
-      state = blankState();
+      if (!confirm('确定清空所有记录？其他设备同步后也会一起清空。')) return;
+      if (!confirm('再确认一次：记录会被标记为删除，分类会保留。')) return;
+      var now = Date.now();
+      state.timer = null;
+      state.entries.forEach(function (e) {
+        if (!e.deletedAt) { e.deletedAt = now; e.updatedAt = now; }
+      });
       save(); renderAll();
+      if (syncCfg.mode !== 'off') syncNow(true);
       toast('已清空');
     });
 
@@ -1657,9 +1955,14 @@
       if (ev.key === 'Escape') closeSheets();
     });
 
-    // 回到前台时刷新
+    // 回到前台时刷新，并补一次同步
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) { renderAll(); tick(); }
+      if (document.hidden) return;
+      renderAll();
+      tick();
+      if (syncCfg.mode !== 'off' && syncCfg.auto && Date.now() - (syncCfg.lastAt || 0) > 20000) {
+        syncNow(true);
+      }
     });
   }
 
@@ -1877,15 +2180,27 @@
 
   /* ================= 启动 ================= */
   function boot() {
+    loadSyncCfg();
     state = DEMO ? demoState() : load();
     lastDayKey = dayKey(Date.now());
     bindEvents();
     switchView(INIT_VIEW);
     renderAll();
+    renderSync();
+    renderSyncStatus();
     setInterval(tick, 1000);
     if (activeEntry()) tick();
 
     if (!storageOK) toast('本地存储不可用，数据刷新后会丢失');
+
+    // 自动同步：启动时补一次，之后每分钟轮询
+    if (syncCfg.mode !== 'off' && syncCfg.auto) {
+      setTimeout(function () { syncNow(true); }, 1500);
+      setInterval(function () {
+        if (DEMO || document.hidden) return;
+        syncNow(true);
+      }, 60000);
+    }
 
     // PWA
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
