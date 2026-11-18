@@ -1060,6 +1060,11 @@
     return { v: SCHEMA, cats: clone(state.cats), entries: entries };
   }
 
+  // 内容一致就不必写回远端，省流量也避免刷出一堆无意义的版本
+  function samePayload(a, b) {
+    try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; }
+  }
+
   // 把远端数据吸收进本地；期间不触发回推，否则会和同步本身形成循环
   function applyRemote(payload) {
     if (!payload || !Array.isArray(payload.entries)) return 0;
@@ -1095,10 +1100,16 @@
 
       applyRemote(remote.payload);
 
+      var payload = syncPayload();
+      if (samePayload(payload, remote.payload)) {
+        syncCfg.rev = remote.rev; // 两边一致，不用推
+        return;
+      }
+
       var pr = await fetch(base + '/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ since: remote.rev, payload: syncPayload() })
+        body: JSON.stringify({ since: remote.rev, payload: payload })
       });
 
       if (pr.status === 409) continue; // 别人刚提交过，重新取一遍再合并
@@ -1131,23 +1142,31 @@
   async function syncGist() {
     if (!syncCfg.gistToken) throw new Error('请先填写 GitHub Token');
 
+    var remoteStr = null;
+
     if (syncCfg.gistId) {
       var g = await ghFetch('/gists/' + encodeURIComponent(syncCfg.gistId));
       var file = g.files && g.files[GIST_FILE];
       var content = file && file.content;
       if (file && file.truncated && file.raw_url) {
-        var raw = await fetch(file.raw_url);
+        var raw = await fetch(file.raw_url, { cache: 'no-store' });
         if (raw.ok) content = await raw.text();
       }
       if (content) {
+        remoteStr = content;
         var remote = null;
         try { remote = JSON.parse(content); } catch (e) {}
         if (remote) applyRemote(remote);
       }
     }
 
+    var outStr = JSON.stringify(syncPayload());
+
+    // 内容没变就不写回，否则每分钟都会刷出一个新的 gist 版本
+    if (syncCfg.gistId && remoteStr === outStr) return;
+
     var files = {};
-    files[GIST_FILE] = { content: JSON.stringify(syncPayload()) };
+    files[GIST_FILE] = { content: outStr };
 
     if (!syncCfg.gistId) {
       var created = await ghFetch('/gists', {
@@ -1253,7 +1272,7 @@
       html += '<div class="actions"><button class="btn main" id="btnSyncNow">立即同步</button></div>';
       panel.innerHTML = html;
     } else {
-      html = '<p class="hint">数据存到 GitHub 的一个私有 Gist，换网络也能同步。需要一个带 <b>gist</b> 权限的 Personal Access Token。</p>';
+      html = '<p class="hint">数据存到 GitHub 的一个 <b>secret gist</b>：不会出现在列表和搜索里，但拿到链接的人无需登录就能读。换网络也能同步。</p>';
       html += '<div class="fld" style="margin-top:12px"><label>Token</label>' +
         '<input id="syncGistToken" type="password" placeholder="ghp_..." value="' + esc(syncCfg.gistToken) + '"></div>';
       html += '<div class="fld"><label>Gist ID（留空会自动新建）</label>' +

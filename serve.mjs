@@ -249,22 +249,33 @@ const isMain = (() => {
 
 if (isMain) {
   const PORT = Number(process.env.PORT || 5180);
+  // 默认只监听本机：服务里有 /api/sync 这类无鉴权接口，
+  // 绑到 0.0.0.0 就等于把全部记录暴露给同网段任何人。
+  const BIND_LAN = process.argv.includes('--lan') || process.env.TT_LAN === '1';
+  const HOST = BIND_LAN ? '0.0.0.0' : '127.0.0.1';
+
   const server = createServer();
-  server.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, HOST, () => {
     const local = `http://localhost:${PORT}`;
     console.log('');
     console.log('  时间账本已启动');
     console.log('  电脑：' + local);
-    const lan = lanAddresses();
-    if (!lan.length) {
-      console.log('  手机：没找到局域网地址，请确认电脑已连接 WiFi');
+
+    if (BIND_LAN) {
+      const lan = lanAddresses();
+      for (const ip of lan) {
+        console.log('  手机：http://' + ip.address + ':' + PORT + '   （' + ip.name + '）');
+      }
+      console.log('');
+      console.log('  ⚠ 已开启局域网访问：同网络的任何人只要知道这个地址，');
+      console.log('    就能读取和修改你的全部时间记录。只在自己信任的网络里用。');
+      console.log('    校园网 / 公共 WiFi 请务必关掉，改用 Gist 同步。');
+    } else {
+      console.log('  仅本机可访问（手机连不上，这是默认的安全设置）');
+      console.log('  需要手机访问时用：node serve.mjs --lan，并自行放行防火墙');
     }
-    for (const ip of lan) {
-      console.log('  手机：http://' + ip.address + ':' + PORT + '   （' + ip.name + '，需与电脑同一个 WiFi）');
-    }
+
     console.log('');
-    console.log('  自动同步已就绪，手机与电脑打开同一个地址即会互相同步');
-    console.log('  手机打不开？多半是 Windows 防火墙没放行，见 README「手机连不上」');
     console.log('  按 Ctrl+C 停止');
     console.log('');
 
