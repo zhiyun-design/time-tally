@@ -1246,7 +1246,17 @@
     else if (syncState.status === 'error') txt = '<span class="sync-err">同步失败：' + esc(syncState.error) + '</span>';
     else if (syncCfg.lastAt) txt = ago(syncCfg.lastAt) + '同步过';
     else txt = '尚未同步';
-    el.innerHTML = '<div class="sync-line"><span class="sync-dot ' + syncDotClass() + '"></span><span class="t">' + txt + '</span></div>';
+
+    // 把「用哪个 Gist」和「本机多少条」亮出来，两端一对就知道有没有对上
+    var detail = '本机 ' + liveEntries().length + ' 条';
+    if (syncCfg.mode === 'gist') {
+      detail += syncCfg.gistId
+        ? ' · Gist ' + esc(String(syncCfg.gistId).slice(0, 8)) + '…'
+        : ' · 尚未创建 Gist';
+    }
+
+    el.innerHTML = '<div class="sync-line"><span class="sync-dot ' + syncDotClass() + '"></span><span class="t">' + txt + '</span></div>' +
+      '<div class="sync-line" style="margin-top:4px"><span class="t">' + detail + '</span></div>';
   }
 
   function updateSyncDot() {
@@ -1930,7 +1940,14 @@
     $('#syncCard').addEventListener('click', function (ev) {
       var b = ev.target.closest('[data-syncmode]');
       if (b) { setSyncMode(b.dataset.syncmode); return; }
-      if (ev.target.closest('#btnSyncNow')) syncNow(false);
+      if (ev.target.closest('#btnSyncNow')) {
+        // 第二台设备漏填 Gist ID 会静默新建一个，导致两端各存各的
+        if (syncCfg.mode === 'gist' && !syncCfg.gistId) {
+          var go = confirm('还没有填写 Gist ID。\n\n· 这是第一台设备 → 点「确定」，会新建一个 Gist\n· 这是第二台设备 → 点「取消」，先把第一台的 Gist ID 填进来\n\n否则两端会各存各的，永远同步不到一起。');
+          if (!go) return;
+        }
+        syncNow(false);
+      }
     });
     $('#syncCard').addEventListener('input', function (ev) {
       var t = ev.target;
