@@ -220,12 +220,22 @@ export function createServer() {
 
 export function lanAddresses() {
   const out = [];
+  // 虚拟网卡（WSL / 虚拟机 / Docker 等）对手机毫无意义，必须排除
+  const skipName = /vEthernet|WSL|VMware|VirtualBox|Hyper-V|Loopback|Docker|Teredo|Bluetooth|Npcap|Tailscale|ZeroTier/i;
   const nets = os.networkInterfaces();
+
   for (const name of Object.keys(nets)) {
+    if (skipName.test(name)) continue;
     for (const net of nets[name] || []) {
-      if (net.family === 'IPv4' && !net.internal) out.push(net.address);
+      if (net.family !== 'IPv4' || net.internal) continue;
+      if (/^169\.254\./.test(net.address)) continue; // 没有拿到 DHCP 时的自动地址
+      out.push({ name, address: net.address });
     }
   }
+
+  // 无线网卡优先，通常手机连的就是它
+  const wireless = (s) => (/WLAN|Wi-?Fi|Wireless|无线/i.test(s.name) ? 0 : 1);
+  out.sort((a, b) => wireless(a) - wireless(b));
   return out;
 }
 
@@ -245,11 +255,16 @@ if (isMain) {
     console.log('');
     console.log('  时间账本已启动');
     console.log('  电脑：' + local);
-    for (const ip of lanAddresses()) {
-      console.log('  手机：http://' + ip + ':' + PORT + '   （需与电脑同一个 WiFi）');
+    const lan = lanAddresses();
+    if (!lan.length) {
+      console.log('  手机：没找到局域网地址，请确认电脑已连接 WiFi');
+    }
+    for (const ip of lan) {
+      console.log('  手机：http://' + ip.address + ':' + PORT + '   （' + ip.name + '，需与电脑同一个 WiFi）');
     }
     console.log('');
     console.log('  自动同步已就绪，手机与电脑打开同一个地址即会互相同步');
+    console.log('  手机打不开？多半是 Windows 防火墙没放行，见 README「手机连不上」');
     console.log('  按 Ctrl+C 停止');
     console.log('');
 
